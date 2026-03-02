@@ -1,13 +1,17 @@
-import { fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import {
+  fireEvent,
+  renderRouter,
+  screen,
+  testRouter,
+  waitFor,
+} from "expo-router/testing-library";
 
 import {
   ADMIN_LOGIN_ROUTE,
   CREATE_MASTER_ADMIN_ROUTE,
 } from "@/domain/services/entry-gate";
-import {
-  clearAdminSession,
-  setAdminSession,
-} from "@/domain/services/admin-session";
+import * as adminSessionService from "@/domain/services/admin-session";
+import { clearAdminSession, setAdminSession } from "@/domain/services/admin-session";
 
 const PUBLIC_CREATE_MASTER_ADMIN_ROUTE = "/create-master-admin";
 const PUBLIC_ADMIN_LOGIN_ROUTE = "/login";
@@ -438,6 +442,78 @@ describe("Entry gate router integration", () => {
     await waitFor(() => {
       expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
     });
+  });
+
+  it("logs out from dashboard and returns to login", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: true,
+      elapsedMs: 0,
+    });
+
+    const app = renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "masteruser");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.press(screen.getByText("Sign In"));
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
+    });
+
+    fireEvent.press(screen.getByLabelText("Log Out"));
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    });
+    expect(screen.queryByText("Admin Dashboard")).toBeFalsy();
+
+    expect(testRouter.canGoBack()).toBe(false);
+
+    app.unmount();
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_DASHBOARD_ROUTE });
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    });
+  });
+
+  it("handles rapid logout taps with a single session clear", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: true,
+      elapsedMs: 0,
+    });
+    const clearSessionSpy = jest.spyOn(adminSessionService, "clearAdminSession");
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "masteruser");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.press(screen.getByText("Sign In"));
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
+    });
+
+    const logoutButton = screen.getByLabelText("Log Out");
+    fireEvent.press(logoutButton);
+    fireEvent.press(logoutButton);
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    });
+    expect(clearSessionSpy).toHaveBeenCalledTimes(1);
+    clearSessionSpy.mockRestore();
   });
 
   it("prevents duplicate auth submits on rapid double tap", async () => {

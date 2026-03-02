@@ -44,7 +44,7 @@ development_status:
   1-1-set-up-initial-project-from-starter-template-first-run-gating-shell: done
   1-2-create-initial-master-admin-username-password: done
   1-3-admin-login-protected-admin-session-non-persistent: done
-  1-4-admin-logout: backlog
+  1-4-admin-logout: done
   epic-1-retrospective: optional
   epic-2: backlog
   2-1-create-and-switch-store-owners: backlog

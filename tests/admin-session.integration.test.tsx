@@ -60,8 +60,37 @@ describe("admin-session non-persistence", () => {
       { reason: "Error" },
     );
 
+    notified.length = 0;
+    expect(() => session.clearAdminSession()).not.toThrow();
+    expect(notified).toEqual(["first", "second"]);
+
     unsubscribeFirst();
     unsubscribeSecond();
     warnSpy.mockRestore();
+  });
+
+  it("clears active session state and notifies subscribers on logout", () => {
+    const session = loadAdminSessionModule();
+    const snapshots: Array<{ authenticated: boolean; username: string | null }> =
+      [];
+
+    const unsubscribe = session.subscribeToAdminSession(() => {
+      snapshots.push({
+        authenticated: session.isAdminAuthenticated(),
+        username: session.getAdminSession()?.username ?? null,
+      });
+    });
+
+    session.setAdminSession({ id: 1, username: "admin" });
+    session.clearAdminSession();
+
+    expect(session.isAdminAuthenticated()).toBe(false);
+    expect(session.getAdminSession()).toBeNull();
+    expect(snapshots).toEqual([
+      { authenticated: true, username: "admin" },
+      { authenticated: false, username: null },
+    ]);
+
+    unsubscribe();
   });
 });

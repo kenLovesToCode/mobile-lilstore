@@ -1,18 +1,39 @@
-import React, { useSyncExternalStore } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
+import React, { useRef, useState, useSyncExternalStore } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
+  clearAdminSession,
   getAdminSession,
   subscribeToAdminSession,
 } from "@/domain/services/admin-session";
 
 export default function AdminDashboardScreen() {
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const logoutLockRef = useRef(false);
   const session = useSyncExternalStore(
     subscribeToAdminSession,
     getAdminSession,
     () => null,
   );
+
+  function onLogout() {
+    if (logoutLockRef.current || isLoggingOut) {
+      return;
+    }
+
+    logoutLockRef.current = true;
+    setIsLoggingOut(true);
+
+    try {
+      clearAdminSession();
+      router.replace("/login");
+    } catch {
+      logoutLockRef.current = false;
+      setIsLoggingOut(false);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -23,6 +44,21 @@ export default function AdminDashboardScreen() {
         </Text>
         <Text style={styles.identityLabel}>Signed in as</Text>
         <Text style={styles.identityValue}>{session?.username ?? "admin"}</Text>
+        <Pressable
+          accessibilityLabel="Log Out"
+          accessibilityRole="button"
+          disabled={isLoggingOut}
+          onPress={onLogout}
+          style={({ pressed }) => [
+            styles.logoutButton,
+            pressed && !isLoggingOut && styles.logoutButtonPressed,
+            isLoggingOut && styles.logoutButtonDisabled,
+          ]}
+        >
+          <Text style={styles.logoutButtonLabel}>
+            {isLoggingOut ? "Logging Out..." : "Log Out"}
+          </Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -75,5 +111,32 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     fontWeight: "800",
     color: "#FF6B6B",
+  },
+  logoutButton: {
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#FF6B6B",
+    backgroundColor: "#FF6B6B",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#FF6B6B",
+    shadowOpacity: 0.24,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  logoutButtonPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
+  },
+  logoutButtonDisabled: {
+    opacity: 0.75,
+  },
+  logoutButtonLabel: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
   },
 });
