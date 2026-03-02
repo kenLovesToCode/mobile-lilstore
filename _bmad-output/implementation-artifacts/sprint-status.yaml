@@ -1,0 +1,85 @@
+# generated: 2026-03-02T13:58:07+08:00
+# project: LilStore
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: /Users/kenlovestocode/Desktop/Me/ai/LilStore/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-03-02T13:58:07+08:00
+project: LilStore
+project_key: NOKEY
+tracking_system: file-system
+story_location: /Users/kenlovestocode/Desktop/Me/ai/LilStore/_bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: backlog
+  1-1-set-up-initial-project-from-starter-template-first-run-gating-shell: backlog
+  1-2-create-initial-master-admin-username-password: backlog
+  1-3-admin-login-protected-admin-session-non-persistent: backlog
+  1-4-admin-logout: backlog
+  epic-1-retrospective: optional
+  epic-2: backlog
+  2-1-create-and-switch-store-owners: backlog
+  2-2-owner-data-isolation-enforcement: backlog
+  2-3-manage-shoppers-per-owner-with-unique-pins: backlog
+  2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: backlog
+  epic-2-retrospective: optional
+  epic-3: backlog
+  3-1-create-and-edit-products-name-barcode: backlog
+  3-2-prevent-duplicate-barcodes-within-an-owner: backlog
+  3-3-archive-or-delete-products: backlog
+  epic-3-retrospective: optional
+  epic-4: backlog
+  4-1-create-shopping-list-items-unit-price-available-qty: backlog
+  4-2-configure-optional-bundle-offers: backlog
+  4-3-create-and-manage-assorted-shopping-list-groups: backlog
+  4-4-admin-shopping-list-management-remains-responsive-at-scale: backlog
+  epic-4-retrospective: optional
+  epic-5: backlog
+  5-1-pin-entry-unlocks-shopper-session: backlog
+  5-2-scanner-ready-fast-not-available-blocking: backlog
+  5-3-quantity-selection-with-guardrails-draft-cart: backlog
+  5-4-cart-preview-and-editing-before-confirm: backlog
+  epic-5-retrospective: optional
+  epic-6: backlog
+  6-1-confirm-purchase-atomic-with-unit-pricing: backlog
+  6-2-bundle-pricing-computation-bundles-first-auditability: backlog
+  6-3-assorted-items-pooled-availability-labeling: backlog
+  6-4-per-shopper-balance-and-ledger-invariants: backlog
+  6-5-record-shopper-payments-reduce-balance: backlog
+  6-6-purchase-and-payment-history-views-owner-scoped: backlog
+  epic-6-retrospective: optional
+  epic-7: backlog
+  7-1-export-full-backup-to-json-all-owners: backlog
+  7-2-restore-backup-replace-all-atomic-validated: backlog
+  7-3-admin-dashboard-alerts-low-stock-backup-freshness: backlog
+  7-4-dashboard-accessible-and-useful-in-offline-mode: backlog
+  epic-7-retrospective: optional
