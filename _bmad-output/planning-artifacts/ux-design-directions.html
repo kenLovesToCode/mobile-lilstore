@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LilStore UX Design Directions</title>
+  <style>
+    :root {
+      --bg: #fff7f1;
+      --surface: #ffffff;
+      --primary: #ff6b6b;
+      --accent: #ffb385;
+      --text: #1f2937;
+      --textMuted: #6b7280;
+      --border: #f3e6dd;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --error: #ef4444;
+
+      --r-sm: 14px;
+      --r-md: 18px;
+      --r-lg: 26px;
+
+      --shadow-warm: 0 12px 26px rgba(255, 107, 107, 0.12);
+      --shadow-soft: 0 18px 40px rgba(31, 41, 55, 0.10);
+      --shadow-inset: inset 3px 3px 10px rgba(31, 41, 55, 0.10), inset -3px -3px 10px rgba(255, 255, 255, 0.85);
+
+      --tap: 44px;
+      --gap-1: 8px;
+      --gap-2: 12px;
+      --gap-3: 16px;
+      --gap-4: 24px;
+
+      --dur-fast: 140ms;
+      --dur-med: 220ms;
+      --ease: cubic-bezier(.2,.9,.2,1);
+
+      --font: ui-rounded, system-ui, -apple-system, "SF Pro Rounded", "Avenir Next", "Nunito", "Quicksand", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      background:
+        radial-gradient(1000px 600px at 20% 0%, rgba(255, 179, 133, 0.35), transparent 60%),
+        radial-gradient(900px 600px at 100% 20%, rgba(255, 107, 107, 0.18), transparent 55%),
+        var(--bg);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(14px);
+      background: rgba(255, 247, 241, 0.72);
+      border-bottom: 1px solid rgba(243, 230, 221, 0.9);
+    }
+
+    .topbar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 260px;
+    }
+
+    .brand h1 {
+      font-size: 16px;
+      margin: 0;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
+
+    .pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 107, 107, 0.10);
+      border: 1px solid rgba(255, 107, 107, 0.22);
+      color: #b4233a;
+      font-weight: 800;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .select {
+      appearance: none;
+      font-family: var(--font);
+      font-weight: 800;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      padding: 10px 38px 10px 14px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.85));
+      box-shadow: 0 10px 22px rgba(31, 41, 55, 0.06);
+      color: var(--text);
+      cursor: pointer;
+      position: relative;
+    }
+
+    .select-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .select-wrap:after {
+      content: "▾";
+      position: absolute;
+      right: 14px;
+      pointer-events: none;
+      color: rgba(31, 41, 55, 0.55);
+      font-weight: 900;
+    }
+
+    .btn {
+      height: 40px;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.75);
+      padding: 0 14px;
+      font-family: var(--font);
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(31, 41, 55, 0.06);
+      transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+    }
+
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 14px 30px rgba(31, 41, 55, 0.09); }
+    .btn:active { transform: translateY(0px) scale(0.99); }
+
+    .layout {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 18px 16px 40px;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 18px;
+    }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .brand { min-width: 0; }
+    }
+
+    .panel {
+      border-radius: var(--r-lg);
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.62);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+
+    .panel .hd {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(243, 230, 221, 0.9);
+    }
+
+    .panel .hd h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .panel .bd { padding: 14px 16px 16px; }
+
+    .meta {
+      font-size: 12px;
+      color: rgba(31, 41, 55, 0.70);
+      line-height: 1.45;
+    }
+
+    .meta code {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: rgba(255, 107, 107, 0.10);
+      border: 1px solid rgba(255, 107, 107, 0.20);
+      padding: 2px 6px;
+      border-radius: 999px;
+    }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .chip {
+      font-size: 12px;
+      font-weight: 900;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.68);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(280px, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      border-radius: 28px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.85);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+
+    .card .chd {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(243, 230, 221, 0.9);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .title h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 1000;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 1000;
+      letter-spacing: 0.2px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 179, 133, 0.22);
+      border: 1px solid rgba(255, 179, 133, 0.55);
+      color: rgba(31, 41, 55, 0.78);
+      flex: none;
+    }
+
+    .card .cbd { padding: 14px 16px 18px; }
+
+    /* Phone mock */
+    .phone {
+      width: 290px;
+      margin: 0 auto;
+      padding: 14px;
+      border-radius: 44px;
+      background: #1b1b1d;
+      box-shadow: 0 30px 70px rgba(31,41,55,0.35);
+    }
+
+    .screen {
+      border-radius: 30px;
+      overflow: hidden;
+      background: var(--bg);
+      border: 1px solid rgba(255,255,255,0.06);
+      min-height: 560px;
+      position: relative;
+    }
+
+    .statusbar {
+      height: 24px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: rgba(31,41,55,0.70);
+    }
+
+    .app {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .app h4 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 1000;
+      letter-spacing: 0.2px;
+    }
+
+    .sub {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 800;
+      color: rgba(31, 41, 55, 0.62);
+    }
+
+    .soft-card {
+      border-radius: 22px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.86);
+      box-shadow: var(--shadow-warm);
+      padding: 12px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(255,255,255,0.95), rgba(255,255,255,0.70) 45%, rgba(255, 179, 133, 0.35) 100%);
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      box-shadow: 0 10px 22px rgba(31, 41, 55, 0.08);
+      display: grid;
+      place-items: center;
+      font-weight: 1000;
+      color: rgba(31, 41, 55, 0.72);
+      flex: none;
+    }
+
+    .btn-primary {
+      height: 48px;
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 107, 107, 0.55);
+      background: linear-gradient(180deg, rgba(255, 107, 107, 1), rgba(255, 107, 107, 0.85));
+      color: white;
+      font-weight: 1000;
+      font-size: 14px;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      box-shadow: 0 14px 30px rgba(255, 107, 107, 0.25);
+      transition: transform var(--dur-fast) var(--ease);
+    }
+
+    .btn-primary:active { transform: scale(0.99); }
+
+    .btn-ghost {
+      height: 48px;
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.80);
+      color: rgba(31,41,55,0.82);
+      font-weight: 1000;
+      cursor: pointer;
+      box-shadow: 0 14px 30px rgba(31,41,55,0.08);
+      transition: transform var(--dur-fast) var(--ease);
+    }
+
+    .btn-ghost:active { transform: scale(0.99); }
+
+    .kbd {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .key {
+      height: 52px;
+      border-radius: 18px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.82);
+      box-shadow: var(--shadow-warm);
+      font-weight: 1000;
+      display: grid;
+      place-items: center;
+      color: rgba(31,41,55,0.88);
+    }
+
+    .key.soft { box-shadow: var(--shadow-inset); background: rgba(255,255,255,0.70); }
+
+    .note {
+      font-size: 12px;
+      font-weight: 900;
+      color: rgba(31,41,55,0.68);
+    }
+
+    /* Variations */
+    .dir-a .screen {
+      background:
+        radial-gradient(900px 400px at 10% 0%, rgba(255, 179, 133, 0.55), transparent 55%),
+        radial-gradient(900px 400px at 100% 30%, rgba(255, 107, 107, 0.22), transparent 55%),
+        var(--bg);
+    }
+
+    .dir-a .soft-card { border-radius: 26px; }
+
+    .dir-b .screen {
+      background:
+        linear-gradient(180deg, rgba(255, 179, 133, 0.35), rgba(255, 247, 241, 0.92) 40%, rgba(255,255,255,0.25)),
+        var(--bg);
+    }
+
+    .dir-b .soft-card {
+      background: rgba(255,255,255,0.70);
+      box-shadow: var(--shadow-inset);
+    }
+
+    .dir-b .btn-primary {
+      border-radius: 999px;
+    }
+
+    .dir-c .screen {
+      background:
+        radial-gradient(1200px 600px at 50% 0%, rgba(255, 107, 107, 0.18), transparent 60%),
+        linear-gradient(180deg, rgba(255, 247, 241, 1), rgba(255, 247, 241, 0.92));
+    }
+
+    .dir-c .soft-card {
+      border-radius: 18px;
+      box-shadow: 0 16px 40px rgba(31,41,55,0.10);
+    }
+
+    .dir-c .btn-primary {
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255, 107, 107, 1), rgba(225, 29, 72, 0.92));
+    }
+
+    .dir-d .screen {
+      background:
+        linear-gradient(135deg, rgba(255, 179, 133, 0.40), rgba(255, 107, 107, 0.18)),
+        var(--bg);
+    }
+
+    .dir-d .soft-card {
+      border-radius: 30px;
+      background: rgba(255,255,255,0.78);
+    }
+
+    .dir-d .icon {
+      width: 46px;
+      height: 46px;
+      border-radius: 18px;
+    }
+
+    .dir-e .screen {
+      background:
+        radial-gradient(900px 400px at 10% 0%, rgba(255, 179, 133, 0.50), transparent 55%),
+        radial-gradient(900px 400px at 100% 10%, rgba(255, 107, 107, 0.24), transparent 55%),
+        var(--bg);
+    }
+
+    .dir-e .soft-card {
+      border-radius: 20px;
+      background: rgba(255,255,255,0.92);
+      border-color: rgba(255, 107, 107, 0.10);
+    }
+
+    .dir-e .btn-primary {
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(34, 197, 94, 1), rgba(34, 197, 94, 0.85));
+      border-color: rgba(34, 197, 94, 0.55);
+      box-shadow: 0 14px 30px rgba(34, 197, 94, 0.24);
+    }
+
+    .dir-f .screen {
+      background:
+        radial-gradient(1200px 600px at 50% 0%, rgba(255, 179, 133, 0.45), transparent 60%),
+        radial-gradient(900px 600px at 100% 30%, rgba(255, 107, 107, 0.16), transparent 55%),
+        var(--bg);
+    }
+
+    .dir-f .soft-card {
+      border-radius: 26px;
+      background: rgba(255,255,255,0.86);
+    }
+
+    .dir-f .btn-primary {
+      border-radius: 26px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .dir-f .btn-primary:before {
+      content: "";
+      position: absolute;
+      inset: -40% -20% auto auto;
+      width: 140px;
+      height: 140px;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.65), transparent 60%);
+      transform: rotate(20deg);
+      opacity: 0.8;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: rgba(31,41,55,0.68);
+      font-weight: 900;
+    }
+
+    .kbd .key {
+      transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+    }
+
+    .kbd .key:hover { transform: translateY(-1px); filter: saturate(1.1); }
+    .kbd .key:active { transform: translateY(0px) scale(0.99); }
+
+    .switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 900;
+      font-size: 12px;
+      color: rgba(31,41,55,0.72);
+      user-select: none;
+    }
+
+    .toggle {
+      width: 48px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 230, 221, 0.95);
+      background: rgba(255,255,255,0.75);
+      position: relative;
+      box-shadow: 0 12px 24px rgba(31,41,55,0.08);
+      cursor: pointer;
+    }
+
+    .toggle:before {
+      content: "";
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(255, 107, 107, 1), rgba(255, 107, 107, 0.85));
+      box-shadow: 0 10px 18px rgba(255, 107, 107, 0.20);
+      transition: transform var(--dur-med) var(--ease);
+    }
+
+    .toggle.on:before { transform: translateX(20px); }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <h1>LilStore Design Directions</h1>
+        <span class="pill">Peach Soda + Rounded</span>
+      </div>
+      <div class="controls">
+        <label class="switch">
+          <span>Soft UI</span>
+          <span id="softToggle" class="toggle on" role="switch" aria-checked="true" tabindex="0"></span>
+          <span class="sr-only">Toggle Soft UI</span>
+        </label>
+        <div class="select-wrap">
+          <select id="focus" class="select">
+            <option value="home">Home</option>
+            <option value="pin">PIN</option>
+            <option value="scan">Scan</option>
+            <option value="cart">Cart</option>
+            <option value="recorded">Recorded</option>
+          </select>
+        </div>
+        <div class="select-wrap">
+          <select id="layout" class="select">
+            <option value="grid">All Directions</option>
+            <option value="a">Direction A</option>
+            <option value="b">Direction B</option>
+            <option value="c">Direction C</option>
+            <option value="d">Direction D</option>
+            <option value="e">Direction E</option>
+            <option value="f">Direction F</option>
+          </select>
+        </div>
+        <button id="compare" class="btn" type="button">Compare: A vs F</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="hd">
+        <h2>How To Review</h2>
+        <span class="tag">Fast + Trust</span>
+      </div>
+      <div class="bd">
+        <div class="meta">
+          Focus on the rush-hour loop: <code>PIN → Scan → Qty → Cart → Confirm</code> and the “Recorded” moment that removes doubt.
+          These directions explore different levels of Soft UI and motion polish while staying readable.
+        </div>
+        <div class="chips">
+          <div class="chip">Big tap targets</div>
+          <div class="chip">Unmissable states</div>
+          <div class="chip">Cute, girly warmth</div>
+          <div class="chip">Skeuo/soft depth</div>
+          <div class="chip">High contrast text</div>
+          <div class="chip">Short transitions</div>
+        </div>
+        <div style="height: 14px"></div>
+        <div class="meta">
+          <b>Directions</b>
+          <ul>
+            <li><b>A</b>: Plush cards + candy gradients (playful)</li>
+            <li><b>B</b>: Neumorphic keypad emphasis (tactile)</li>
+            <li><b>C</b>: Cleaner + sharper (more utilitarian)</li>
+            <li><b>D</b>: Big bubbly buttons (very cute)</li>
+            <li><b>E</b>: Success-forward “receipt” vibe (trust)</li>
+            <li><b>F</b>: Glossy skeuo highlights (fun premium)</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <div id="grid" class="grid">
+        <!-- Direction cards injected by JS -->
+      </div>
+    </main>
+  </div>
+
+  <template id="direction">
+    <section class="card" data-dir="">
+      <div class="chd">
+        <div class="title">
+          <h3></h3>
+          <span class="tag"></span>
+        </div>
+        <div class="hint"></div>
+      </div>
+      <div class="cbd">
+        <div class="phone">
+          <div class="screen">
+            <div class="statusbar"><span>9:41</span><span>LTE • 78%</span></div>
+            <div class="app"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <script>
+    const directions = [
+      { key: 'a', cls: 'dir-a', name: 'Direction A', tag: 'Plush + Playful', hint: 'Candy warmth, soft cards, gentle motion.' },
+      { key: 'b', cls: 'dir-b', name: 'Direction B', tag: 'Neumorphic Touch', hint: 'Tactile keypad + inset surfaces.' },
+      { key: 'c', cls: 'dir-c', name: 'Direction C', tag: 'Clean + Quick', hint: 'Sharper structure, less ornament.' },
+      { key: 'd', cls: 'dir-d', name: 'Direction D', tag: 'Bubbly Cute', hint: 'Big buttons, extra girly energy.' },
+      { key: 'e', cls: 'dir-e', name: 'Direction E', tag: 'Receipt Trust', hint: 'Recorded moment is the hero.' },
+      { key: 'f', cls: 'dir-f', name: 'Direction F', tag: 'Glossy Skeuo', hint: 'Premium highlights, fun depth.' },
+    ];
+
+    const focusScreens = {
+      home: (variant) => `
+        <h4>Welcome</h4>
+        <p class="sub">Self-service honest store</p>
+        <div class="soft-card">
+          <div class="row">
+            <div style="display:flex; gap:10px; align-items:center; min-width:0;">
+              <div class="icon">🛍</div>
+              <div style="min-width:0;">
+                <div style="font-weight:1000; font-size:14px;">Buy Now</div>
+                <div class="note">PIN required • auto logout</div>
+              </div>
+            </div>
+            <div class="tag">Fast</div>
+          </div>
+        </div>
+        <button class="btn-primary" type="button">Buy Now</button>
+        <button class="btn-ghost" type="button">Admin</button>
+        <div class="note">Cute look + clear flow, even during rush hour.</div>
+      `,
+
+      pin: (variant) => `
+        <h4>Enter PIN</h4>
+        <p class="sub">Unlock scanner session</p>
+        <div class="soft-card" style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:1000;">PIN</div>
+            <div class="note">••••</div>
+          </div>
+          <span class="tag">Secure</span>
+        </div>
+        <div class="kbd">
+          ${Array.from({length: 9}, (_, i) => `<div class="key">${i+1}</div>`).join('')}
+          <div class="key soft">⌫</div>
+          <div class="key">0</div>
+          <div class="key soft">OK</div>
+        </div>
+        <button class="btn-primary" type="button">Unlock</button>
+      `,
+
+      scan: (variant) => `
+        <h4>Scan Item</h4>
+        <p class="sub">Only items on shopping list</p>
+        <div class="soft-card" style="padding: 10px;">
+          <div style="height: 180px; border-radius: 18px; border: 1px dashed rgba(31,41,55,0.18); display:grid; place-items:center; color: rgba(31,41,55,0.55); font-weight:1000;">
+            Camera View
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 10px;">
+            <div>
+              <div style="font-weight:1000;">Cookies (assorted)</div>
+              <div class="note">Unit ₱2 • Bundle 3 for ₱5</div>
+            </div>
+            <span class="tag">Available</span>
+          </div>
+        </div>
+        <div class="soft-card" style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:1000;">Quantity</div>
+            <div class="note">Tap + / −</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div class="key soft" style="width:44px; height:44px;">−</div>
+            <div style="font-weight:1000; width:36px; text-align:center;">3</div>
+            <div class="key" style="width:44px; height:44px;">+</div>
+          </div>
+        </div>
+        <button class="btn-primary" type="button">Add To Cart</button>
+        <div class="note">Instant feedback is critical here.</div>
+      `,
+
+      cart: (variant) => `
+        <h4>Your Cart</h4>
+        <p class="sub">Review + confirm</p>
+        <div class="soft-card">
+          <div class="row"><div style="font-weight:1000;">Cookies (assorted)</div><div class="note">Qty 3</div></div>
+          <div class="row"><div class="note">Bundle applied</div><div style="font-weight:1000;">₱5</div></div>
+          <div style="height: 8px"></div>
+          <div class="row"><div style="font-weight:1000;">Soda</div><div class="note">Qty 1</div></div>
+          <div class="row"><div class="note">Unit</div><div style="font-weight:1000;">₱12</div></div>
+          <div style="height: 12px"></div>
+          <div class="row"><div style="font-weight:1000;">Total</div><div style="font-weight:1000; font-size: 20px;">₱17</div></div>
+        </div>
+        <button class="btn-primary" type="button">Confirm Purchase</button>
+        <button class="btn-ghost" type="button">Edit Cart</button>
+      `,
+
+      recorded: (variant) => `
+        <h4>Recorded</h4>
+        <p class="sub">Purchase saved successfully</p>
+        <div class="soft-card" style="border-color: rgba(34,197,94,0.25);">
+          <div class="row">
+            <div style="display:flex; gap:10px; align-items:center;">
+              <div class="icon" style="background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.95), rgba(255,255,255,0.75) 45%, rgba(34, 197, 94, 0.35) 100%);">✓</div>
+              <div>
+                <div style="font-weight:1000;">Saved</div>
+                <div class="note">2 items • Total ₱17</div>
+              </div>
+            </div>
+            <span class="tag" style="background: rgba(34,197,94,0.16); border-color: rgba(34,197,94,0.35);">Trusted</span>
+          </div>
+          <div style="height: 10px"></div>
+          <div class="note">Returning to Home…</div>
+        </div>
+        <button class="btn-primary" type="button">Done</button>
+        <div class="note">This screen eliminates shopper doubt.</div>
+      `,
+    };
+
+    const grid = document.getElementById('grid');
+    const tmpl = document.getElementById('direction');
+
+    function render() {
+      grid.innerHTML = '';
+
+      const focus = document.getElementById('focus').value;
+      const layout = document.getElementById('layout').value;
+      const softOn = document.getElementById('softToggle').classList.contains('on');
+
+      let dirs = directions;
+      if (layout !== 'grid') {
+        dirs = directions.filter(d => d.key === layout);
+      }
+
+      for (const d of dirs) {
+        const node = tmpl.content.cloneNode(true);
+        const card = node.querySelector('.card');
+        card.dataset.dir = d.key;
+        card.classList.add(d.cls);
+        node.querySelector('h3').textContent = d.name;
+        node.querySelector('.tag').textContent = d.tag;
+        node.querySelector('.hint').textContent = d.hint;
+
+        const app = node.querySelector('.app');
+        app.innerHTML = focusScreens[focus](d.key);
+
+        if (!softOn) {
+          // Flatten when Soft UI is off.
+          card.querySelectorAll('.soft-card, .key').forEach(el => {
+            el.style.boxShadow = 'none';
+          });
+          card.querySelectorAll('.soft-card').forEach(el => {
+            el.style.background = 'rgba(255,255,255,0.92)';
+          });
+        }
+
+        grid.appendChild(node);
+      }
+    }
+
+    function setCompare() {
+      document.getElementById('layout').value = 'grid';
+      render();
+      // Hide all but A and F for quick compare
+      [...grid.querySelectorAll('.card')].forEach(c => {
+        const dir = c.dataset.dir;
+        c.style.display = (dir === 'a' || dir === 'f') ? '' : 'none';
+      });
+    }
+
+    document.getElementById('focus').addEventListener('change', render);
+    document.getElementById('layout').addEventListener('change', render);
+    document.getElementById('compare').addEventListener('click', setCompare);
+
+    const toggle = document.getElementById('softToggle');
+    function toggleSoft() {
+      toggle.classList.toggle('on');
+      toggle.setAttribute('aria-checked', toggle.classList.contains('on') ? 'true' : 'false');
+      render();
+    }
+    toggle.addEventListener('click', toggleSoft);
+    toggle.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSoft(); }
+    });
+
+    render();
+  </script>
+</body>
+</html>
