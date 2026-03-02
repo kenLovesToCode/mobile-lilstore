@@ -823,3 +823,237 @@ Key rule: layouts don’t “reflow” into multiple columns; they scale spacing
 - Keep scanner overlays minimal; anchor essential actions and avoid decorative layers in scan viewport.
 - Implement “commit” buttons with loading + disabled states to prevent double submits.
 - Implement reduced-motion mode: shorten/disable non-essential transitions while preserving “Recorded” clarity.
+
+---
+
+## Admin Flows UX Coverage (Addendum)
+
+This addendum fills in admin UX coverage gaps for: **owners, products, shoppers, payments, history, backup/restore, and alerts**.
+
+### Admin Entry & Session Model
+
+**Entry point**
+- Home shows two primary actions: `Buy Now` (shopper) and `Admin` (owner/admin).
+- Tapping `Admin` opens **Admin Login**.
+
+**Admin Login**
+- Username + password (as per PRD).
+- Primary CTA: `Sign in`.
+- Secondary: `Cancel` (returns to Home).
+- Error state: “Incorrect username or password” (no detail leakage).
+- Optional security hardening (post-MVP): rate limiting + temporary lockouts.
+
+**Session behavior (shared device)**
+- Admin session is **non-persistent**: on app restart, require login again.
+- Inactivity timeout: show a lock screen and require re-auth to continue admin actions.
+- High-risk actions require explicit re-auth (at minimum: **Restore**).
+
+**Owner context**
+- Admin UI always displays the **Active Store Owner** (e.g., chip in header).
+- Switching owner context changes the scope of: products, shopping list, shoppers, ledger, history, alerts.
+
+### Admin IA (Information Architecture)
+
+**Admin Home (per owner context)**
+- Sections/cards:
+  - `Owners` (master admin only)
+  - `Products`
+  - `Shopping List` (for-sale list)
+  - `Shoppers`
+  - `Ledger & Payments`
+  - `History`
+  - `Backup & Restore`
+  - `Alerts`
+- Header shows active owner + quick `Switch`.
+- Global action: `Log out`.
+
+**Navigation style (phone-first)**
+- Stack navigation from Admin Home into each module.
+- Prefer bottom sheets for quick edits (availability, price tweaks) and modals for destructive/high-risk confirmations.
+
+### Owners (Master Admin)
+
+**Owners list**
+- Rows show: owner name + summary counts (shoppers, products, shopping list items) + quick `Switch`.
+- Empty state: “No store owners yet” + `Create owner`.
+
+**Create owner**
+- Fields: owner display name (required).
+- After creation: prompt to `Switch to this owner` (primary).
+- If additional owner-level authentication is introduced later, keep it in a separate “Owner Access” section (don’t overload MVP).
+
+**Switch owner**
+- Confirmation only if there are unsaved edits in the current screen.
+- Visual confirmation after switch: banner “Switched to {OwnerName}”.
+
+**Archive owner (preferred over delete)**
+- Archive keeps all history for auditability; owner no longer appears in shopper flow.
+- Confirmation modal must be explicit: “This will hide this owner and prevent new purchases for this owner. History is preserved.”
+
+### Products (Catalog)
+
+**Products list**
+- Must scale to 200+ products: virtualized list, fast search.
+- Search: by name and barcode.
+- Filters: `Active` / `Archived`.
+- Primary CTA: `Add product`.
+- Secondary CTA: `Scan barcode` (fills barcode field in create form).
+
+**Create/Edit product**
+- Fields:
+  - `Name` (required)
+  - `Barcode` (required; numeric/alphanumeric; typically scan-filled)
+- Validation:
+  - Duplicate barcode (within active owner): block save and show existing product match with quick action `View existing`.
+  - Empty required fields: inline errors.
+- Archive product:
+  - If referenced in shopping list: block with guidance (“Remove from shopping list first”) or offer a guided flow to remove it.
+
+**Barcode scanning pattern (admin)**
+- Scan view is dedicated to admin tasks (not the shopper purchase scanner).
+- After successful scan: show a compact confirmation (barcode value) + `Use barcode`.
+- Provide manual entry fallback (camera permission denied / damaged barcode).
+
+### Shopping List (For-Sale List)
+
+**Shopping list overview**
+- Rows show: item name, availability, unit price, bundle flag, and low/zero stock indicator.
+- Quick adjustments:
+  - Availability stepper (+/–) with guardrail at 0.
+  - “Edit” bottom sheet for price + bundle.
+- Empty state: “No items published for sale” + `Add to shopping list`.
+
+**Add to shopping list**
+- Step 1: choose product (search or scan barcode).
+- Step 2: set:
+  - `Unit price (₱)` (required, > 0)
+  - Optional `Bundle offer` (`bundleQty` ≥ 2, `bundlePrice` > 0)
+  - `Available quantity` (required, ≥ 0)
+- Confirmation: show a mini “Published” card with summary + `Add another`.
+
+**Assorted shopping list item**
+- Create flow:
+  - Name (e.g., “Assorted Drinks”) + select member products (search + multi-select).
+  - Shared pricing rules (unit + optional bundle) + shared availability pool.
+- Manage members:
+  - Add/remove members with duplicate prevention.
+  - Explain behavior: “Any member scan consumes the same shared available quantity.”
+- Guardrail copy must be explicit and simple (assorted is the most conceptually complex admin feature in MVP).
+
+### Shoppers
+
+**Shoppers list**
+- Rows show: shopper name + balance owed + last activity (optional).
+- Search by name; optional sort by balance.
+- Primary CTA: `Add shopper`.
+- Empty state: “No shoppers yet” + `Add shopper`.
+
+**Create shopper**
+- Fields:
+  - `Name` (required)
+  - `PIN` (required; numeric; minimum 4 digits; entered via keypad)
+- PIN validation:
+  - Must be unique across all shoppers on the device (PRD).
+  - Error state should not leak other-owner details; use neutral copy: “That PIN is already in use. Try a different PIN.”
+- On save: show a “Shopper created” confirmation + `Add another` / `View shopper`.
+
+**Edit shopper**
+- Allow name edits.
+- Do not display existing PIN (stored as hash).
+- Provide `Reset PIN` action:
+  - Requires entering a new PIN twice (confirm) via keypad.
+  - Same uniqueness rules apply.
+
+**Archive shopper**
+- Archive prevents future purchases but preserves history.
+- Confirmation message: “Archiving keeps purchase/payment history for records.”
+
+### Payments (Ledger & Payments)
+
+**Shopper detail (hub)**
+- Header: shopper name + current balance.
+- Actions:
+  - `Record payment`
+  - `View history`
+- Show short summary:
+  - Last purchase date
+  - Last payment date
+
+**Record payment flow**
+- Default timestamp: now (editable only if needed; keep MVP simple).
+- Amount entry:
+  - Numeric keypad with presets: `Exact balance`, `₱50`, `₱100`, `₱200`.
+  - Validation: amount > 0.
+  - If amount exceeds balance:
+    - Show warning and require confirmation (“This will make the balance negative.”), or clamp to balance with a one-tap fix (`Set to exact`).
+- Success state:
+  - “Payment recorded” receipt-style card (amount, timestamp, resulting balance) + `Done`.
+
+### History (Purchases & Payments)
+
+**History landing**
+- Two tabs: `Purchases` and `Payments`.
+- Filters:
+  - Date range (default: last 7 days)
+  - Shopper selector (optional)
+- Performance: keep filters lightweight and fast; no heavy charts in MVP.
+
+**Purchase history**
+- Row fields: timestamp, shopper name, item count, total (₱).
+- Detail view:
+  - Line items: name, quantity, unit/bundle inputs used, computed line totals.
+  - Total summary + “Recorded by {shopper}”.
+- Immutable record principle:
+  - No edit/delete UI in MVP; corrections are additive future work (void/adjustment records).
+
+**Payment history**
+- Row fields: timestamp, shopper name, amount (₱).
+- Detail view: amount + resulting balance (if stored) + notes (if added later).
+
+### Backup & Restore (Entire Database)
+
+**Backup screen**
+- Shows:
+  - Last backup time (and “backup age” badge)
+  - `Export backup` (primary)
+  - `Restore backup` (secondary, destructive)
+- Explain scope clearly: “Backup includes all store owners, shoppers (PIN hashes), products, shopping lists, and history.”
+
+**Export backup**
+- UX requirements:
+  - Progress state that prevents double-tap.
+  - Success state shows filename + exportedAt + share/save action.
+  - Update “Last backup time” and clear “stale backup” alerts.
+
+**Restore backup (replace-all, atomic)**
+- Flow:
+  1. Pick JSON file (system document picker)
+  2. Validate (schemaVersion + integrity)
+  3. Show summary before commit (counts by owners/shoppers/products/history records)
+  4. Destructive confirmation with explicit wording:
+     - “This will replace all local data on this device.”
+  5. Restore progress screen (cannot be dismissed)
+  6. Completion: “Restore complete” + require admin re-login
+- Failure states:
+  - Invalid file / schema mismatch: show actionable message, do not change local data.
+  - Partial restore must never occur (atomic guarantee).
+
+### Alerts (In-App Dashboard)
+
+**Alert types (MVP)**
+- Low/zero stock shopping list items.
+- Backup freshness reminder (e.g., “No backup in X days”).
+
+**Alerts screen**
+- Group by type with clear headings.
+- Each alert row includes a direct fix CTA:
+  - Low stock → `Adjust availability` (opens the shopping list item bottom sheet).
+  - Backup stale → `Export backup` (opens backup screen).
+- Alerts should be persistent until resolved (avoid “dismiss” in MVP unless there’s a “snooze until tomorrow” rule).
+
+### Admin UX Consistency Rules
+
+- Prefer **explicit receipts** after critical writes: product saved, shopper created, payment recorded, backup exported, restore completed.
+- Keep high-risk actions visually distinct (destructive styling + explicit copy).
+- Always surface **owner context** in the header to prevent cross-owner mistakes.
+- Keep admin flows fully offline-capable (including backup/restore) with clear permission prompts and recoverable failures.
