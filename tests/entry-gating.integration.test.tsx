@@ -12,9 +12,13 @@ const mockResolveEntryRouteFromAdminCheck = jest.fn();
 const mockResolveCreateMasterAdminVisibility = jest.fn();
 const mockResolveAdminLoginVisibility = jest.fn();
 const mockHasAnyAdmin = jest.fn();
+const mockCreateInitialMasterAdmin = jest.fn();
 
 jest.mock("@/domain/services/auth-service", () => ({
   hasAnyAdmin: () => mockHasAnyAdmin(),
+  createInitialMasterAdmin: (...args: unknown[]) =>
+    mockCreateInitialMasterAdmin(...args),
+  normalizeAdminUsername: (value: string) => value.trim().toLowerCase(),
 }));
 
 jest.mock("@/domain/services/entry-gate-runtime", () => ({
@@ -63,6 +67,11 @@ describe("Entry gate router integration", () => {
       kind: "success",
       value: true,
       elapsedMs: 0,
+    });
+    mockCreateInitialMasterAdmin.mockResolvedValue({
+      kind: "success",
+      username: "admin",
+      createdAtMs: 1700000000000,
     });
   });
 
@@ -159,10 +168,11 @@ describe("Entry gate router integration", () => {
     await waitFor(() => {
       expect(screen.getByText("Create Master Admin")).toBeTruthy();
     });
+    expect(screen.getByLabelText("Username")).toBeTruthy();
     await expectResolverWiring(mockResolveCreateMasterAdminVisibility, false);
   });
 
-  it("renders create-master-admin shell content when no admin exists", async () => {
+  it("renders create-master-admin form content when no admin exists", async () => {
     mockResolveCreateMasterAdminVisibility.mockResolvedValue({
       kind: "success",
       value: true,
@@ -174,7 +184,124 @@ describe("Entry gate router integration", () => {
     await waitFor(() => {
       expect(screen.getByText("Create Master Admin")).toBeTruthy();
     });
+    expect(screen.getByLabelText("Username")).toBeTruthy();
+    expect(screen.getByLabelText("Password")).toBeTruthy();
+    expect(screen.getByLabelText("Confirm Password")).toBeTruthy();
+    expect(screen.getByText("Create Admin Account")).toBeTruthy();
     await expectResolverWiring(mockResolveCreateMasterAdminVisibility, false);
+  });
+
+  it("submits create-master-admin form and routes to login on success", async () => {
+    renderRouter(ROUTES, { initialUrl: PUBLIC_CREATE_MASTER_ADMIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "  MasterUser  ");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.changeText(screen.getByLabelText("Confirm Password"), "Password123!");
+    fireEvent.press(screen.getByText("Create Admin Account"));
+
+    await waitFor(() => {
+      expect(mockCreateInitialMasterAdmin).toHaveBeenCalledWith({
+        username: "masteruser",
+        password: "Password123!",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    });
+  });
+
+  it("shows user-safe validation message when form fields are invalid", async () => {
+    renderRouter(ROUTES, { initialUrl: PUBLIC_CREATE_MASTER_ADMIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "owner");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.changeText(screen.getByLabelText("Confirm Password"), "Mismatch!");
+    fireEvent.press(screen.getByText("Create Admin Account"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Password and confirmation must match.")).toBeTruthy();
+    });
+    expect(mockCreateInitialMasterAdmin).not.toHaveBeenCalled();
+    expect(screen).toHavePathname(PUBLIC_CREATE_MASTER_ADMIN_ROUTE);
+  });
+
+  it("redirects to login when service reports setup already complete", async () => {
+    mockCreateInitialMasterAdmin.mockResolvedValue({
+      kind: "already-exists",
+      message: "Admin setup is already complete. Please sign in.",
+    });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_CREATE_MASTER_ADMIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "owner");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.changeText(screen.getByLabelText("Confirm Password"), "Password123!");
+    fireEvent.press(screen.getByText("Create Admin Account"));
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    });
+  });
+
+  it("shows a safe failure message when create-admin service fails", async () => {
+    mockCreateInitialMasterAdmin.mockResolvedValue({
+      kind: "error",
+      message: "We couldn't create the admin account right now. Please retry.",
+    });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_CREATE_MASTER_ADMIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "owner");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.changeText(screen.getByLabelText("Confirm Password"), "Password123!");
+    fireEvent.press(screen.getByText("Create Admin Account"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("We couldn't create the admin account right now. Please retry."),
+      ).toBeTruthy();
+    });
+    expect(screen).toHavePathname(PUBLIC_CREATE_MASTER_ADMIN_ROUTE);
+  });
+
+  it("clears plaintext password fields after invalid submit attempt", async () => {
+    renderRouter(ROUTES, { initialUrl: PUBLIC_CREATE_MASTER_ADMIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    const passwordInput = screen.getByLabelText("Password");
+    const confirmPasswordInput = screen.getByLabelText("Confirm Password");
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "owner");
+    fireEvent.changeText(passwordInput, "Password123!");
+    fireEvent.changeText(confirmPasswordInput, "Mismatch!");
+    fireEvent.press(screen.getByText("Create Admin Account"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Password and confirmation must match.")).toBeTruthy();
+    });
+
+    expect(screen.queryByDisplayValue("Password123!")).toBeFalsy();
+    expect(screen.queryByDisplayValue("Mismatch!")).toBeFalsy();
   });
 
   it("redirects login shell to create-master-admin when no admin exists", async () => {
