@@ -1,0 +1,3 @@
+import { CREATE_ADMIN_TABLE_SQL } from "@/db/schema";
+
+export const INITIAL_MIGRATION_STATEMENTS = [CREATE_ADMIN_TABLE_SQL];

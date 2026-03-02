@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": ".tmp-tests",
+    "rootDir": ".",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "declaration": false
+  },
+  "include": [
+    "src/domain/services/entry-gate.ts",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
+  ]
+}
