@@ -130,6 +130,10 @@ describe("createInitialMasterAdmin", () => {
       kind: "error",
       message: "We couldn't create the admin account right now. Please retry.",
     });
+    expect(mockWarn).toHaveBeenCalledWith(
+      "[auth-service] createInitialMasterAdmin failed",
+      { reason: "Error" },
+    );
     expect(mockUpdateEntryGateSnapshotAfterAdminChange).not.toHaveBeenCalled();
   });
 

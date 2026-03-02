@@ -1,0 +1,79 @@
+import React, { useSyncExternalStore } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import {
+  getAdminSession,
+  subscribeToAdminSession,
+} from "@/domain/services/admin-session";
+
+export default function AdminDashboardScreen() {
+  const session = useSyncExternalStore(
+    subscribeToAdminSession,
+    getAdminSession,
+    () => null,
+  );
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.card}>
+        <Text style={styles.title}>Admin Dashboard</Text>
+        <Text style={styles.description}>
+          Protected admin session is active for this runtime.
+        </Text>
+        <Text style={styles.identityLabel}>Signed in as</Text>
+        <Text style={styles.identityValue}>{session?.username ?? "admin"}</Text>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    backgroundColor: "#FFF7F1",
+  },
+  card: {
+    width: "100%",
+    maxWidth: 560,
+    borderRadius: 26,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: "#F3E6DD",
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#1F2937",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 12 },
+    shadowRadius: 24,
+    elevation: 5,
+    gap: 10,
+  },
+  title: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    color: "#1F2937",
+  },
+  description: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#374151",
+  },
+  identityLabel: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  identityValue: {
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "800",
+    color: "#FF6B6B",
+  },
+});

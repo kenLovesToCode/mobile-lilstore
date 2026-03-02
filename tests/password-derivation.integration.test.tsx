@@ -1,82 +1,105 @@
-import {
-  DEFAULT_SCRYPT_PARAMS,
-  derivePasswordCredentialMaterial,
-} from "@/domain/services/password-derivation";
-
 const mockGetRandomBytes = jest.fn();
 
 jest.mock("expo-crypto", () => ({
   getRandomBytes: (...args: unknown[]) => mockGetRandomBytes(...args),
 }));
 
-describe("password derivation", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockGetRandomBytes.mockReturnValue(
-      new Uint8Array([1, 35, 69, 103, 137, 171, 205, 239, 16, 50, 84, 118, 152, 186, 220, 254]),
+import {
+  DEFAULT_SCRYPT_PARAMS,
+  derivePasswordCredentialMaterial,
+  verifyPasswordCredentialMaterial,
+} from "@/domain/services/password-derivation";
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockGetRandomBytes.mockImplementation((size: number) => {
+    return new Uint8Array(size).fill(7);
+  });
+});
+
+describe("derivePasswordCredentialMaterial", () => {
+  it("uses random salt generation by default and produces distinct derived material", async () => {
+    mockGetRandomBytes
+      .mockImplementationOnce((size: number) =>
+        Uint8Array.from({ length: size }, (_, index) => index + 1),
+      )
+      .mockImplementationOnce((size: number) =>
+        Uint8Array.from({ length: size }, (_, index) => index + 19),
+      );
+
+    const first = await derivePasswordCredentialMaterial("Password123!");
+    const second = await derivePasswordCredentialMaterial("Password123!");
+
+    expect(mockGetRandomBytes).toHaveBeenNthCalledWith(
+      1,
+      DEFAULT_SCRYPT_PARAMS.saltLen,
     );
+    expect(mockGetRandomBytes).toHaveBeenNthCalledWith(
+      2,
+      DEFAULT_SCRYPT_PARAMS.saltLen,
+    );
+    expect(first.saltHex).not.toBe(second.saltHex);
+    expect(first.hashHex).not.toBe(second.hashHex);
   });
 
-  it("derives deterministic output for fixed password + salt", async () => {
-    const fixedSalt = new Uint8Array([
-      170, 187, 204, 221, 1, 2, 3, 4, 9, 8, 7, 6, 16, 32, 48, 64,
-    ]);
+  it("throws a safe runtime error when TextEncoder is unavailable", async () => {
+    const globalWithEncoder = global as typeof globalThis & {
+      TextEncoder?: typeof TextEncoder;
+    };
+    const originalTextEncoder = globalWithEncoder.TextEncoder;
+    Reflect.set(globalWithEncoder, "TextEncoder", undefined);
 
-    const first = await derivePasswordCredentialMaterial("Password123!", {
-      salt: fixedSalt,
-    });
-    const second = await derivePasswordCredentialMaterial("Password123!", {
-      salt: fixedSalt,
-    });
-
-    expect(first.hashHex).toBe(second.hashHex);
-    expect(first.saltHex).toBe(second.saltHex);
-    expect(first.params).toEqual({
-      N: DEFAULT_SCRYPT_PARAMS.N,
-      r: DEFAULT_SCRYPT_PARAMS.r,
-      p: DEFAULT_SCRYPT_PARAMS.p,
-      dkLen: DEFAULT_SCRYPT_PARAMS.dkLen,
-    });
-    expect(first.storageValue).not.toContain("Password123!");
-    expect(first.storageValue).toContain(`salt=${first.saltHex}`);
-    expect(first.storageValue).toContain(`hash=${first.hashHex}`);
-  });
-
-  it("produces different hashes for different salts", async () => {
-    const password = "Password123!";
-
-    const materialA = await derivePasswordCredentialMaterial(password, {
-      salt: new Uint8Array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
-    });
-    const materialB = await derivePasswordCredentialMaterial(password, {
-      salt: new Uint8Array([2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]),
-    });
-
-    expect(materialA.hashHex).not.toBe(materialB.hashHex);
-    expect(materialA.saltHex).not.toBe(materialB.saltHex);
-  });
-
-  it("uses expo-crypto random bytes when no salt is provided", async () => {
-    const material = await derivePasswordCredentialMaterial("Password123!");
-
-    expect(mockGetRandomBytes).toHaveBeenCalledWith(DEFAULT_SCRYPT_PARAMS.saltLen);
-    expect(material.saltHex).toBe("0123456789abcdef1032547698badcfe");
-  });
-
-  it("fails safely when TextEncoder is unavailable", async () => {
-    const originalTextEncoder = global.TextEncoder;
     try {
-      // Simulate a runtime where TextEncoder is not installed.
-      (global as { TextEncoder?: typeof TextEncoder }).TextEncoder = undefined;
-
       await expect(
-        derivePasswordCredentialMaterial("Password123!", {
-          salt: new Uint8Array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
-        }),
+        derivePasswordCredentialMaterial("Password123!"),
       ).rejects.toThrow("TextEncoder is unavailable in this runtime.");
     } finally {
-      (global as { TextEncoder?: typeof TextEncoder }).TextEncoder =
-        originalTextEncoder;
+      Reflect.set(globalWithEncoder, "TextEncoder", originalTextEncoder);
     }
+  });
+});
+
+describe("verifyPasswordCredentialMaterial", () => {
+  it("returns true for a matching password and false for a non-matching password", async () => {
+    const material = await derivePasswordCredentialMaterial("Password123!", {
+      salt: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+      params: {
+        N: 1024,
+        r: 8,
+        p: 1,
+        dkLen: 32,
+      },
+    });
+
+    await expect(
+      verifyPasswordCredentialMaterial("Password123!", material.storageValue),
+    ).resolves.toBe(true);
+    await expect(
+      verifyPasswordCredentialMaterial("WrongPassword!", material.storageValue),
+    ).resolves.toBe(false);
+  });
+
+  it("throws for an invalid stored credential format", async () => {
+    await expect(
+      verifyPasswordCredentialMaterial("Password123!", "invalid-format"),
+    ).rejects.toThrow("Invalid stored credential format.");
+  });
+
+  it("throws for unsupported scrypt parameters", async () => {
+    await expect(
+      verifyPasswordCredentialMaterial(
+        "Password123!",
+        "scrypt$N=1000$r=8$p=1$dkLen=32$salt=00112233$hash=44556677",
+      ),
+    ).rejects.toThrow("Unsupported scrypt parameters.");
+  });
+
+  it("throws for oversized scrypt parameters to prevent expensive verification payloads", async () => {
+    await expect(
+      verifyPasswordCredentialMaterial(
+        "Password123!",
+        "scrypt$N=65536$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff$hash=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+      ),
+    ).rejects.toThrow("Unsupported scrypt parameters.");
   });
 });

@@ -4,20 +4,27 @@ import {
   ADMIN_LOGIN_ROUTE,
   CREATE_MASTER_ADMIN_ROUTE,
 } from "@/domain/services/entry-gate";
+import {
+  clearAdminSession,
+  setAdminSession,
+} from "@/domain/services/admin-session";
 
 const PUBLIC_CREATE_MASTER_ADMIN_ROUTE = "/create-master-admin";
 const PUBLIC_ADMIN_LOGIN_ROUTE = "/login";
+const PUBLIC_ADMIN_DASHBOARD_ROUTE = "/dashboard";
 
 const mockResolveEntryRouteFromAdminCheck = jest.fn();
 const mockResolveCreateMasterAdminVisibility = jest.fn();
 const mockResolveAdminLoginVisibility = jest.fn();
 const mockHasAnyAdmin = jest.fn();
 const mockCreateInitialMasterAdmin = jest.fn();
+const mockAuthenticateAdmin = jest.fn();
 
 jest.mock("@/domain/services/auth-service", () => ({
   hasAnyAdmin: () => mockHasAnyAdmin(),
   createInitialMasterAdmin: (...args: unknown[]) =>
     mockCreateInitialMasterAdmin(...args),
+  authenticateAdmin: (...args: unknown[]) => mockAuthenticateAdmin(...args),
   normalizeAdminUsername: (value: string) => value.trim().toLowerCase(),
 }));
 
@@ -36,6 +43,7 @@ const ROUTES = {
   "(admin)/_layout": require("../src/app/(admin)/_layout").default,
   "(admin)/create-master-admin": require("../src/app/(admin)/create-master-admin").default,
   "(admin)/login": require("../src/app/(admin)/login").default,
+  "(admin)/dashboard": require("../src/app/(admin)/dashboard").default,
 };
 
 async function expectResolverWiring(
@@ -52,6 +60,7 @@ async function expectResolverWiring(
 describe("Entry gate router integration", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearAdminSession();
     mockHasAnyAdmin.mockResolvedValue(false);
     mockResolveEntryRouteFromAdminCheck.mockResolvedValue({
       kind: "success",
@@ -72,6 +81,13 @@ describe("Entry gate router integration", () => {
       kind: "success",
       username: "admin",
       createdAtMs: 1700000000000,
+    });
+    mockAuthenticateAdmin.mockResolvedValue({
+      kind: "success",
+      admin: {
+        id: 1,
+        username: "admin",
+      },
     });
   });
 
@@ -345,6 +361,39 @@ describe("Entry gate router integration", () => {
     await expectResolverWiring(mockResolveAdminLoginVisibility, true);
   });
 
+  it("prioritizes authenticated-session redirect over login guard error state", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "error",
+      message: "We couldn't check local setup right now. Please retry.",
+      elapsedMs: 50,
+    });
+    setAdminSession({ id: 1, username: "admin" });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
+    });
+    expect(screen.queryByText("Unable to load entry gate")).toBeFalsy();
+  });
+
+  it("prioritizes authenticated-session redirect over login guard redirect", async () => {
+    mockHasAnyAdmin.mockResolvedValue(false);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: false,
+      elapsedMs: 0,
+    });
+    setAdminSession({ id: 1, username: "admin" });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
+    });
+  });
+
   it("renders login shell content when admin exists", async () => {
     mockHasAnyAdmin.mockResolvedValue(true);
     mockResolveAdminLoginVisibility.mockResolvedValue({
@@ -359,5 +408,135 @@ describe("Entry gate router integration", () => {
       expect(screen.getByText("Admin Login")).toBeTruthy();
     });
     await expectResolverWiring(mockResolveAdminLoginVisibility, true);
+  });
+
+  it("submits login form and redirects to the protected dashboard on success", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: true,
+      elapsedMs: 0,
+    });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "  MasterUser  ");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+    fireEvent.press(screen.getByText("Sign In"));
+
+    await waitFor(() => {
+      expect(mockAuthenticateAdmin).toHaveBeenCalledWith({
+        username: "masteruser",
+        password: "Password123!",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
+    });
+  });
+
+  it("prevents duplicate auth submits on rapid double tap", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: true,
+      elapsedMs: 0,
+    });
+
+    type PendingAuthenticateResult = {
+      kind: "success";
+      admin: {
+        id: number;
+        username: string;
+      };
+    };
+
+    let resolveAuthenticate:
+      | ((result: PendingAuthenticateResult) => void)
+      | undefined;
+    const pendingAuthenticate = new Promise<PendingAuthenticateResult>(
+      (resolve) => {
+      resolveAuthenticate = resolve;
+      },
+    );
+    mockAuthenticateAdmin.mockReturnValueOnce(pendingAuthenticate);
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "masteruser");
+    fireEvent.changeText(screen.getByLabelText("Password"), "Password123!");
+
+    const submitButton = screen.getByText("Sign In");
+    fireEvent.press(submitButton);
+    fireEvent.press(submitButton);
+
+    expect(mockAuthenticateAdmin).toHaveBeenCalledTimes(1);
+
+    resolveAuthenticate?.({
+      kind: "success",
+      admin: {
+        id: 1,
+        username: "admin",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_DASHBOARD_ROUTE);
+    });
+  });
+
+  it("keeps the user on login and shows an error on invalid credentials", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: true,
+      elapsedMs: 0,
+    });
+    mockAuthenticateAdmin.mockResolvedValueOnce({
+      kind: "invalid-credentials",
+      message: "Invalid username or password.",
+    });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_LOGIN_ROUTE });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Username"), "masteruser");
+    const passwordInput = screen.getByLabelText("Password");
+    fireEvent.changeText(passwordInput, "WrongPassword!");
+    fireEvent.press(screen.getByText("Sign In"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Invalid username or password.")).toBeTruthy();
+    });
+    expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    expect((screen.getByLabelText("Password") as { props: { value: string } }).props.value).toBe("");
+    expect(screen.queryByDisplayValue("WrongPassword!")).toBeFalsy();
+  });
+
+  it("redirects logged-out direct dashboard access to login", async () => {
+    mockHasAnyAdmin.mockResolvedValue(true);
+    mockResolveAdminLoginVisibility.mockResolvedValue({
+      kind: "success",
+      value: true,
+      elapsedMs: 0,
+    });
+
+    renderRouter(ROUTES, { initialUrl: PUBLIC_ADMIN_DASHBOARD_ROUTE });
+
+    await waitFor(() => {
+      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
+    });
   });
 });
