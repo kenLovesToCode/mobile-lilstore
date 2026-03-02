@@ -46,8 +46,8 @@ development_status:
   1-3-admin-login-protected-admin-session-non-persistent: done
   1-4-admin-logout: done
   epic-1-retrospective: done
-  epic-2: backlog
-  2-1-create-and-switch-store-owners: backlog
+  epic-2: in-progress
+  2-1-create-and-switch-store-owners: done
   2-2-owner-data-isolation-enforcement: backlog
   2-3-manage-shoppers-per-owner-with-unique-pins: backlog
   2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: backlog

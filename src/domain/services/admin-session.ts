@@ -3,9 +3,16 @@ export type AdminSessionIdentity = {
   username: string;
 };
 
+export type ActiveOwnerContext = {
+  id: number;
+  name: string;
+};
+
 type StoredAdminSessionIdentity = Readonly<AdminSessionIdentity>;
+type StoredActiveOwnerContext = Readonly<ActiveOwnerContext>;
 
 let currentAdminSession: StoredAdminSessionIdentity | null = null;
+let currentActiveOwner: StoredActiveOwnerContext | null = null;
 const listeners = new Set<() => void>();
 
 function getSafeErrorReason(error: unknown) {
@@ -21,6 +28,13 @@ function toImmutableAdminSession(
   return Object.freeze({
     id: admin.id,
     username: admin.username,
+  });
+}
+
+function toImmutableOwnerContext(owner: ActiveOwnerContext): StoredActiveOwnerContext {
+  return Object.freeze({
+    id: owner.id,
+    name: owner.name,
   });
 }
 
@@ -44,13 +58,24 @@ export function isAdminAuthenticated() {
   return currentAdminSession !== null;
 }
 
+export function getActiveOwner() {
+  return currentActiveOwner;
+}
+
 export function setAdminSession(admin: AdminSessionIdentity) {
   currentAdminSession = toImmutableAdminSession(admin);
+  currentActiveOwner = null;
+  emitSessionChange();
+}
+
+export function setActiveOwner(owner: ActiveOwnerContext) {
+  currentActiveOwner = toImmutableOwnerContext(owner);
   emitSessionChange();
 }
 
 export function clearAdminSession() {
   currentAdminSession = null;
+  currentActiveOwner = null;
   emitSessionChange();
 }
 

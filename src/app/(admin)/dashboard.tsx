@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   clearAdminSession,
+  getActiveOwner,
   getAdminSession,
   subscribeToAdminSession,
 } from "@/domain/services/admin-session";
@@ -15,6 +16,11 @@ export default function AdminDashboardScreen() {
   const session = useSyncExternalStore(
     subscribeToAdminSession,
     getAdminSession,
+    () => null,
+  );
+  const activeOwner = useSyncExternalStore(
+    subscribeToAdminSession,
+    getActiveOwner,
     () => null,
   );
 
@@ -44,6 +50,26 @@ export default function AdminDashboardScreen() {
         </Text>
         <Text style={styles.identityLabel}>Signed in as</Text>
         <Text style={styles.identityValue}>{session?.username ?? "admin"}</Text>
+
+        <Text style={styles.ownerLabel}>Active Owner</Text>
+        <Text style={styles.ownerValue}>{activeOwner?.name ?? "None"}</Text>
+
+        {!activeOwner ? (
+          <Text style={styles.ownerGuardText}>No active owner selected.</Text>
+        ) : null}
+
+        <Pressable
+          accessibilityLabel="Go to Owners"
+          accessibilityRole="button"
+          onPress={() => router.push("/owners")}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.secondaryButtonPressed,
+          ]}
+        >
+          <Text style={styles.secondaryButtonLabel}>Go to Owners</Text>
+        </Pressable>
+
         <Pressable
           accessibilityLabel="Log Out"
           accessibilityRole="button"
@@ -111,6 +137,44 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     fontWeight: "800",
     color: "#FF6B6B",
+  },
+  ownerLabel: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  ownerValue: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  ownerGuardText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#B45309",
+    fontWeight: "600",
+  },
+  secondaryButton: {
+    marginTop: 8,
+    minHeight: 44,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  secondaryButtonPressed: {
+    opacity: 0.85,
+  },
+  secondaryButtonLabel: {
+    color: "#374151",
+    fontSize: 14,
+    fontWeight: "800",
   },
   logoutButton: {
     marginTop: 12,
