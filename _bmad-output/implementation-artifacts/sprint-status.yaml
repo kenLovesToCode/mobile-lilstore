@@ -48,7 +48,7 @@ development_status:
   epic-1-retrospective: done
   epic-2: in-progress
   2-1-create-and-switch-store-owners: done
-  2-2-owner-data-isolation-enforcement: backlog
+  2-2-owner-data-isolation-enforcement: done
   2-3-manage-shoppers-per-owner-with-unique-pins: backlog
   2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: backlog
   epic-2-retrospective: optional

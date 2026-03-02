@@ -12,6 +12,8 @@ import {
 
 export default function AdminDashboardScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [ownerSnapshotSummary, setOwnerSnapshotSummary] = useState<string | null>(null);
+  const [ownerSnapshotError, setOwnerSnapshotError] = useState<string | null>(null);
   const logoutLockRef = useRef(false);
   const session = useSyncExternalStore(
     subscribeToAdminSession,
@@ -41,6 +43,23 @@ export default function AdminDashboardScreen() {
     }
   }
 
+  async function onRefreshOwnerScope() {
+    const { getOwnerScopedSnapshot } = await import(
+      "@/domain/services/owner-data-service"
+    );
+    const result = await getOwnerScopedSnapshot();
+    if (!result.ok) {
+      setOwnerSnapshotError(result.error.message);
+      setOwnerSnapshotSummary(null);
+      return;
+    }
+
+    setOwnerSnapshotError(null);
+    setOwnerSnapshotSummary(
+      `Products ${result.value.products.length} · Shoppers ${result.value.shoppers.length} · Shopping List ${result.value.shoppingList.length} · Ledger ${result.value.history.length}`,
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.card}>
@@ -59,6 +78,27 @@ export default function AdminDashboardScreen() {
         ) : null}
 
         <Pressable
+          accessibilityLabel="Refresh Owner Data Snapshot"
+          accessibilityRole="button"
+          disabled={!activeOwner}
+          onPress={() => void onRefreshOwnerScope()}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.secondaryButtonPressed,
+            !activeOwner && styles.secondaryButtonDisabled,
+          ]}
+        >
+          <Text style={styles.secondaryButtonLabel}>Refresh Owner Data Snapshot</Text>
+        </Pressable>
+
+        {ownerSnapshotSummary ? (
+          <Text style={styles.ownerSnapshotText}>{ownerSnapshotSummary}</Text>
+        ) : null}
+        {ownerSnapshotError ? (
+          <Text style={styles.ownerSnapshotErrorText}>{ownerSnapshotError}</Text>
+        ) : null}
+
+        <Pressable
           accessibilityLabel="Go to Owners"
           accessibilityRole="button"
           onPress={() => router.push("/owners")}
@@ -68,6 +108,18 @@ export default function AdminDashboardScreen() {
           ]}
         >
           <Text style={styles.secondaryButtonLabel}>Go to Owners</Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityLabel="Go to Owner Data"
+          accessibilityRole="button"
+          onPress={() => router.push("/owner-data")}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.secondaryButtonPressed,
+          ]}
+        >
+          <Text style={styles.secondaryButtonLabel}>Go to Owner Data</Text>
         </Pressable>
 
         <Pressable
@@ -171,10 +223,25 @@ const styles = StyleSheet.create({
   secondaryButtonPressed: {
     opacity: 0.85,
   },
+  secondaryButtonDisabled: {
+    opacity: 0.5,
+  },
   secondaryButtonLabel: {
     color: "#374151",
     fontSize: 14,
     fontWeight: "800",
+  },
+  ownerSnapshotText: {
+    color: "#374151",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  ownerSnapshotErrorText: {
+    color: "#B91C1C",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
   },
   logoutButton: {
     marginTop: 12,
