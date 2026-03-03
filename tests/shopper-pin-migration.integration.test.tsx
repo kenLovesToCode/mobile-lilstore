@@ -194,6 +194,47 @@ describe("shopper pin hash migration compatibility", () => {
     );
   });
 
+  it("clears duplicate hash-only legacy rows to preserve pin_key uniqueness on upgrade", async () => {
+    const mockDb = {
+      getAllAsync: jest.fn().mockResolvedValueOnce([
+        {
+          id: 21,
+          pin: null,
+          pin_hash:
+            "scrypt$N=16384$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff$hash=beadbead",
+          pin_key: null,
+        },
+        {
+          id: 22,
+          pin: null,
+          pin_hash:
+            "scrypt$N=16384$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff$hash=beadbead",
+          pin_key: null,
+        },
+      ]),
+      execAsync: jest.fn().mockResolvedValue(undefined),
+      runAsync: jest.fn().mockResolvedValue({ changes: 1, lastInsertRowId: 0 }),
+    };
+    mockExtractShopperPinUniquenessKeyFromCredentialIfCompatible
+      .mockReturnValueOnce("beadbead")
+      .mockReturnValueOnce("beadbead");
+
+    await backfillLegacyShopperPins(
+      mockDb,
+      "00112233445566778899aabbccddeeff",
+    );
+
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("SET pin_key = ?"),
+      "beadbead",
+      21,
+    );
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("SET pin_hash = NULL, pin_key = NULL"),
+      22,
+    );
+  });
+
   it("uses SQLite-compatible migration statements", () => {
     expect(SHOPPER_PIN_HASH_GLOBAL_UNIQUENESS_MIGRATION_STATEMENTS).toEqual(
       expect.arrayContaining([

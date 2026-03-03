@@ -50,7 +50,7 @@ development_status:
   2-1-create-and-switch-store-owners: done
   2-2-owner-data-isolation-enforcement: done
   2-3-manage-shoppers-per-owner-with-unique-pins: done
-  2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: backlog
+  2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: done
   epic-2-retrospective: optional
   epic-3: backlog
   3-1-create-and-edit-products-name-barcode: backlog

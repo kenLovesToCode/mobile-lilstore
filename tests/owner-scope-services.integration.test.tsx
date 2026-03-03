@@ -344,6 +344,182 @@ describe("owner-scoped services", () => {
     });
   });
 
+  it("looks up a shopper by pin across owners and returns only session-safe identity fields", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 55,
+          owner_id: 99,
+          name: "Owner B Shopper",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await shopperService.lookupShopperByPin("1234");
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        shopperId: 55,
+        ownerId: 99,
+        displayName: "Owner B Shopper",
+      },
+    });
+    if (result.ok) {
+      expect((result.value as { pinHash?: string }).pinHash).toBeUndefined();
+      expect((result.value as { pinKey?: string }).pinKey).toBeUndefined();
+    }
+  });
+
+  it("supports shopper entry lookup via dedicated consumer path", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 77,
+          owner_id: 11,
+          name: "Entry Shopper",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await shopperService.resolveShopperEntryByPin("5678");
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        shopperId: 77,
+        ownerId: 11,
+        displayName: "Entry Shopper",
+      },
+    });
+  });
+
+  it("rejects invalid pin format for shopper lookup", async () => {
+    const result = await shopperService.lookupShopperByPin("12a");
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message: "Shopper PIN must be at least 4 digits.",
+      },
+    });
+    expect(mockBootstrapDatabase).not.toHaveBeenCalled();
+    expect(mockDb.getAllAsync).not.toHaveBeenCalled();
+  });
+
+  it("returns not-found when shopper pin lookup has no match", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await shopperService.lookupShopperByPin("1234");
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: "No shopper was found for this PIN.",
+      },
+    });
+  });
+
+  it("matches legacy plaintext shopper rows during lookup", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 909,
+          owner_id: 7,
+          name: "Legacy Plaintext Shopper",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await shopperService.lookupShopperByPin("1234");
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        shopperId: 909,
+        ownerId: 7,
+        displayName: "Legacy Plaintext Shopper",
+      },
+    });
+  });
+
+  it("matches legacy hash-only shopper rows during lookup", async () => {
+    const { deriveShopperPinCredentialMaterial } = require(
+      "@/domain/services/password-derivation"
+    );
+    const legacyMaterial = await deriveShopperPinCredentialMaterial(
+      "1234",
+      "00112233445566778899aabbccddeeff",
+    );
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 808,
+          owner_id: 42,
+          name: "Legacy Hash Shopper",
+          pin_hash: legacyMaterial.storageValue,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await shopperService.lookupShopperByPin("1234");
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        shopperId: 808,
+        ownerId: 42,
+        displayName: "Legacy Hash Shopper",
+      },
+    });
+  });
+
+  it("fails safely when lookup detects multiple shopper matches for one pin", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          owner_id: 11,
+          name: "Primary Shopper",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 2,
+          owner_id: 12,
+          name: "Legacy Shopper",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await shopperService.lookupShopperByPin("1234");
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message:
+          "PIN lookup is ambiguous for this device. Reset shopper PINs before continuing.",
+      },
+    });
+  });
+
   it("requires shopper pin when creating shoppers", async () => {
     const result = await shopperService.createShopper({
       name: "Shopper A",

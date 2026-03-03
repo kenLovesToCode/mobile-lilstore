@@ -1,6 +1,7 @@
 import { bootstrapDatabase, getDb } from "@/db/db";
 import { APP_SECRET_TABLE, SHOPPER_TABLE } from "@/db/schema";
 import {
+  SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS,
   deriveShopperPinCredentialMaterial,
   deriveShopperPinUniquenessKey,
   verifyPasswordCredentialMaterial,
@@ -71,7 +72,16 @@ const SHOPPER_NAME_INVALID_MESSAGE = "Shopper name is required.";
 const SHOPPER_PIN_INVALID_MESSAGE = "Shopper PIN must be at least 4 digits.";
 const SHOPPER_PIN_CONFLICT_MESSAGE =
   "A shopper with this PIN already exists on this device.";
+const SHOPPER_PIN_NOT_FOUND_MESSAGE = "No shopper was found for this PIN.";
+const SHOPPER_PIN_LOOKUP_AMBIGUOUS_MESSAGE =
+  "PIN lookup is ambiguous for this device. Reset shopper PINs before continuing.";
 const SHOPPER_PIN_SALT_SECRET_KEY = "shopper_pin_salt_hex";
+
+export type ShopperPinLookupIdentity = {
+  shopperId: number;
+  ownerId: number;
+  displayName: string;
+};
 
 async function findShopperById(shopperId: number) {
   const db = getDb();
@@ -115,6 +125,33 @@ type LegacyPinHashRow = {
   pin_hash: string | null;
 };
 
+type ShopperLookupRow = {
+  id: number;
+  owner_id: number;
+  name: string;
+};
+
+type LegacyPinHashLookupRow = ShopperLookupRow & {
+  pin_hash: string | null;
+};
+
+function buildCompatibleLegacyPinHashStorageValue(
+  pinKey: string,
+  deviceSaltHex: string,
+) {
+  const normalizedDeviceSalt = deviceSaltHex.trim().toLowerCase();
+  const normalizedPinKey = pinKey.trim().toLowerCase();
+  return [
+    "scrypt",
+    `N=${SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.N}`,
+    `r=${SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.r}`,
+    `p=${SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.p}`,
+    `dkLen=${SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.dkLen}`,
+    `salt=${normalizedDeviceSalt}`,
+    `hash=${normalizedPinKey}`,
+  ].join("$");
+}
+
 async function findShopperWithLegacyPinHashConflict(
   pin: string,
   excludeShopperId?: number,
@@ -152,6 +189,84 @@ async function findShopperWithLegacyPinHashConflict(
   }
 
   return null;
+}
+
+async function findShoppersByPinKey(pinKey: string) {
+  const db = getDb();
+  return db.getAllAsync<ShopperLookupRow>(
+    `SELECT id, owner_id, name
+     FROM ${SHOPPER_TABLE}
+     WHERE pin_key = ?;`,
+    pinKey,
+  );
+}
+
+async function findShoppersWithLegacyPin(pin: string) {
+  const db = getDb();
+  return db.getAllAsync<ShopperLookupRow>(
+    `SELECT id, owner_id, name
+     FROM ${SHOPPER_TABLE}
+     WHERE pin = ?;`,
+    pin,
+  );
+}
+
+async function findShoppersWithLegacyPinHash(
+  pin: string,
+  pinKey: string,
+  deviceSaltHex: string,
+  excludedShopperIds: Set<number>,
+) {
+  const db = getDb();
+  const matches: ShopperLookupRow[] = [];
+  const compatibleLegacyHashStorageValue = buildCompatibleLegacyPinHashStorageValue(
+    pinKey,
+    deviceSaltHex,
+  );
+
+  const compatibleRows = await db.getAllAsync<ShopperLookupRow>(
+    `SELECT id, owner_id, name
+     FROM ${SHOPPER_TABLE}
+     WHERE pin_hash = ?
+       AND pin_hash IS NOT NULL
+       AND (pin_key IS NULL OR length(trim(pin_key)) = 0);`,
+    compatibleLegacyHashStorageValue,
+  );
+
+  for (const row of compatibleRows) {
+    if (!excludedShopperIds.has(row.id)) {
+      matches.push(row);
+    }
+  }
+
+  const rows = await db.getAllAsync<LegacyPinHashLookupRow>(
+    `SELECT id, owner_id, name, pin_hash
+     FROM ${SHOPPER_TABLE}
+     WHERE pin_hash IS NOT NULL
+       AND (pin_key IS NULL OR length(trim(pin_key)) = 0)
+       AND pin_hash != ?;`,
+    compatibleLegacyHashStorageValue,
+  );
+
+  for (const row of rows) {
+    if (excludedShopperIds.has(row.id) || !row.pin_hash) {
+      continue;
+    }
+    try {
+      const isMatch = await verifyPasswordCredentialMaterial(pin, row.pin_hash);
+      if (isMatch) {
+        matches.push({
+          id: row.id,
+          owner_id: row.owner_id,
+          name: row.name,
+        });
+      }
+    } catch {
+      // Malformed payloads should fail-safe to no match.
+    }
+  }
+
+  return matches;
 }
 
 function validateShopperName(name: string): OwnerScopeResult<never> | null {
@@ -483,4 +598,87 @@ export async function updateShopper(
       },
     };
   }
+}
+
+export async function lookupShopperByPin(
+  rawPin: string,
+): Promise<OwnerScopeResult<ShopperPinLookupIdentity>> {
+  const normalizedPin = normalizePin(rawPin);
+  const pinError = validatePin(normalizedPin, { required: true });
+  if (pinError) {
+    return pinError;
+  }
+
+  if (normalizedPin == null) {
+    return invalidInputError(SHOPPER_PIN_INVALID_MESSAGE);
+  }
+
+  await bootstrapDatabase();
+
+  try {
+    const deviceSalt = await getDeviceShopperPinSalt();
+    const pinKey = await deriveShopperPinUniquenessKey(normalizedPin, deviceSalt);
+    const matchesById = new Map<number, ShopperLookupRow>();
+
+    const pinKeyMatches = await findShoppersByPinKey(pinKey);
+    for (const row of pinKeyMatches) {
+      matchesById.set(row.id, row);
+    }
+
+    const legacyPinMatches = await findShoppersWithLegacyPin(normalizedPin);
+    for (const row of legacyPinMatches) {
+      matchesById.set(row.id, row);
+    }
+
+    const legacyPinHashMatches = await findShoppersWithLegacyPinHash(
+      normalizedPin,
+      pinKey,
+      deviceSalt,
+      new Set<number>(matchesById.keys()),
+    );
+    for (const row of legacyPinHashMatches) {
+      matchesById.set(row.id, row);
+    }
+
+    if (matchesById.size === 0) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: SHOPPER_PIN_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+
+    if (matchesById.size > 1) {
+      return conflictError(SHOPPER_PIN_LOOKUP_AMBIGUOUS_MESSAGE);
+    }
+
+    const [resolvedShopper] = Array.from(matchesById.values());
+    return {
+      ok: true,
+      value: {
+        shopperId: resolvedShopper.id,
+        ownerId: resolvedShopper.owner_id,
+        displayName: resolvedShopper.name,
+      },
+    };
+  } catch (error: unknown) {
+    console.warn("[shopper-service] lookupShopperByPin failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function resolveShopperEntryByPin(
+  rawPin: string,
+): Promise<OwnerScopeResult<ShopperPinLookupIdentity>> {
+  return lookupShopperByPin(rawPin);
 }
