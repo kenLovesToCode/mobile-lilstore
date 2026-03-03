@@ -1,6 +1,10 @@
 import { bootstrapDatabase, getDb } from "@/db/db";
 import { APP_SECRET_TABLE, SHOPPER_TABLE } from "@/db/schema";
-import { deriveShopperPinCredentialMaterial } from "@/domain/services/password-derivation";
+import {
+  deriveShopperPinCredentialMaterial,
+  deriveShopperPinUniquenessKey,
+  verifyPasswordCredentialMaterial,
+} from "@/domain/services/password-derivation";
 import {
   type OwnerScopeResult,
   conflictError,
@@ -106,6 +110,50 @@ async function findShopperWithLegacyPin(
   );
 }
 
+type LegacyPinHashRow = {
+  id: number;
+  pin_hash: string | null;
+};
+
+async function findShopperWithLegacyPinHashConflict(
+  pin: string,
+  excludeShopperId?: number,
+): Promise<{ id: number } | null> {
+  const db = getDb();
+  const rows =
+    typeof excludeShopperId === "number"
+      ? await db.getAllAsync<LegacyPinHashRow>(
+          `SELECT id, pin_hash
+           FROM ${SHOPPER_TABLE}
+           WHERE pin_hash IS NOT NULL
+             AND (pin_key IS NULL OR length(trim(pin_key)) = 0)
+             AND id != ?;`,
+          excludeShopperId,
+        )
+      : await db.getAllAsync<LegacyPinHashRow>(
+          `SELECT id, pin_hash
+           FROM ${SHOPPER_TABLE}
+           WHERE pin_hash IS NOT NULL
+             AND (pin_key IS NULL OR length(trim(pin_key)) = 0);`,
+        );
+
+  for (const row of rows) {
+    if (!row.pin_hash) {
+      continue;
+    }
+    try {
+      const isMatch = await verifyPasswordCredentialMaterial(pin, row.pin_hash);
+      if (isMatch) {
+        return { id: row.id };
+      }
+    } catch {
+      // Malformed legacy payloads should not block writes; they are repaired via update flows.
+    }
+  }
+
+  return null;
+}
+
 function validateShopperName(name: string): OwnerScopeResult<never> | null {
   if (!name) {
     return invalidInputError(SHOPPER_NAME_INVALID_MESSAGE);
@@ -176,23 +224,29 @@ export async function createShopper(
     }
 
     const deviceSalt = await getDeviceShopperPinSalt();
-    const derivedPinMaterial = await deriveShopperPinCredentialMaterial(
-      normalizedPin,
-      deviceSalt,
-    );
+    const [derivedPinMaterial, pinKey] = await Promise.all([
+      deriveShopperPinCredentialMaterial(normalizedPin, deviceSalt),
+      deriveShopperPinUniquenessKey(normalizedPin, deviceSalt),
+    ]);
 
     const conflictingLegacyPin = await findShopperWithLegacyPin(normalizedPin);
     if (conflictingLegacyPin) {
       return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
     }
+    const conflictingLegacyPinHash =
+      await findShopperWithLegacyPinHashConflict(normalizedPin);
+    if (conflictingLegacyPinHash) {
+      return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
+    }
 
     const insertResult = await db.runAsync(
       `INSERT INTO ${SHOPPER_TABLE} (
-         owner_id, name, pin_hash, pin, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, NULL, ?, ?);`,
+         owner_id, name, pin_hash, pin_key, pin, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?);`,
       ownerContext.value.id,
       normalizedName,
       derivedPinMaterial?.storageValue ?? null,
+      pinKey,
       nowMs,
       nowMs,
     );
@@ -326,7 +380,7 @@ export async function updateShopper(
     return nameError;
   }
   if (shouldUpdatePin) {
-    const pinError = validatePin(normalizedPin ?? null);
+    const pinError = validatePin(normalizedPin ?? null, { required: true });
     if (pinError) {
       return pinError;
     }
@@ -361,20 +415,32 @@ export async function updateShopper(
       if (conflictingLegacyPin) {
         return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
       }
+      const conflictingLegacyPinHash =
+        await findShopperWithLegacyPinHashConflict(
+          normalizedPin,
+          input.shopperId,
+        );
+      if (conflictingLegacyPinHash) {
+        return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
+      }
     }
 
     if (shouldUpdatePin) {
       const deviceSalt = await getDeviceShopperPinSalt();
-      const derivedPinMaterial =
-        normalizedPin == null
-          ? null
-          : await deriveShopperPinCredentialMaterial(normalizedPin, deviceSalt);
+      if (normalizedPin == null) {
+        return invalidInputError(SHOPPER_PIN_INVALID_MESSAGE);
+      }
+      const [derivedPinMaterial, pinKey] = await Promise.all([
+        deriveShopperPinCredentialMaterial(normalizedPin, deviceSalt),
+        deriveShopperPinUniquenessKey(normalizedPin, deviceSalt),
+      ]);
       await db.runAsync(
         `UPDATE ${SHOPPER_TABLE}
-         SET name = ?, pin_hash = ?, pin = NULL, updated_at_ms = ?
+         SET name = ?, pin_hash = ?, pin_key = ?, pin = NULL, updated_at_ms = ?
          WHERE id = ? AND owner_id = ?;`,
         normalizedName,
         derivedPinMaterial?.storageValue ?? null,
+        pinKey,
         input.nowMs ?? Date.now(),
         input.shopperId,
         ownerContext.value.id,

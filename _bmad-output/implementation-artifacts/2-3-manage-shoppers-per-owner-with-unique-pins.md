@@ -1,6 +1,6 @@
 # Story 2.3: Manage Shoppers (Per Owner) with Unique PINs
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -62,11 +62,21 @@ so that only enrolled shoppers can buy on credit for the active owner.
   - [x] [AI-Review][MEDIUM] Replace fixed shopper PIN salt with a device-scoped random salt strategy to avoid deterministic cross-install hashes. [src/domain/services/password-derivation.ts:41]
   - [x] [AI-Review][MEDIUM] Add regression tests for required-create PIN, name-only update preserving PIN hash, and migration SQL compatibility. [tests/owner-data-scope.integration.test.tsx:117]
 
-- [ ] Review Follow-ups (AI) - Pass 2
-  - [ ] [AI-Review][HIGH] Backfill existing legacy shopper `pin` rows into `pin_hash` and clear plaintext `pin` so migrated devices no longer retain plaintext PINs. [src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:3]
-  - [ ] [AI-Review][HIGH] Reject explicit PIN clearing on shopper updates (`pin: null` / empty) to keep shopper records compliant with required 4+ digit PIN rules. [src/domain/services/shopper-service.ts:328]
-  - [ ] [AI-Review][MEDIUM] Decouple device-wide uniqueness from serialized scrypt params (indexing full `storageValue`) so future KDF param changes cannot permit duplicate raw PINs. [src/db/schema.ts:101]
-  - [ ] [AI-Review][LOW] Remove React `act(...)` warnings in owner-data integration tests to keep CI logs clean and prevent warning fatigue. [tests/owner-data-scope.integration.test.tsx:109]
+- [x] Review Follow-ups (AI) - Pass 2
+  - [x] [AI-Review][HIGH] Backfill existing legacy shopper `pin` rows into `pin_hash` and clear plaintext `pin` so migrated devices no longer retain plaintext PINs. [src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:3]
+  - [x] [AI-Review][HIGH] Reject explicit PIN clearing on shopper updates (`pin: null` / empty) to keep shopper records compliant with required 4+ digit PIN rules. [src/domain/services/shopper-service.ts:328]
+  - [x] [AI-Review][MEDIUM] Decouple device-wide uniqueness from serialized scrypt params (indexing full `storageValue`) so future KDF param changes cannot permit duplicate raw PINs. [src/db/schema.ts:101]
+  - [x] [AI-Review][LOW] Remove React `act(...)` warnings in owner-data integration tests to keep CI logs clean and prevent warning fatigue. [tests/owner-data-scope.integration.test.tsx:109]
+
+- [x] Review Follow-ups (AI) - Pass 3
+  - [x] [AI-Review][HIGH] Handle migrated datasets with legacy cross-owner duplicate PINs before creating `idx_shopper_pin_key_unique`; current backfill + unique-index sequence can fail app bootstrap on upgrade. [src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:60]
+  - [x] [AI-Review][HIGH] Reconcile Dev Agent Record `File List` with actual git working changes: `src/app/(admin)/owner-data.tsx` and `src/db/migrations/0005_device_secret_salt.ts` are listed but have no current git diff evidence. [_bmad-output/implementation-artifacts/2-3-manage-shoppers-per-owner-with-unique-pins.md:223]
+  - [x] [AI-Review][MEDIUM] Add regression coverage for duplicate legacy PIN migration conflict and expected fallback behavior, so upgrade safety is validated in CI. [tests/shopper-pin-migration.integration.test.tsx:78]
+
+- [x] Review Follow-ups (AI) - Pass 4
+  - [x] [AI-Review][HIGH] Rework hash-only legacy backfill so `pin_key` is guaranteed to use the active device-scoped uniqueness strategy; current `extractHashHexFromStoredCredential` fallback can allow duplicate raw PINs when older rows were derived with a different salt strategy. [src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:106, src/domain/services/shopper-service.ts:182]
+  - [x] [AI-Review][HIGH] Wrap shopper PIN migration/backfill/index changes in one DB transaction; current destructive duplicate handling can commit partial PIN clears before later migration failures. [src/db/db.ts:34, src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:126]
+  - [x] [AI-Review][MEDIUM] Avoid full-table legacy PIN backfill on every bootstrap; gate to one-time migration state to prevent repeat O(n) startup scans as shopper records grow. [src/db/db.ts:53, src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:65]
 
 ## Dev Notes
 
@@ -173,8 +183,8 @@ so that only enrolled shoppers can buy on credit for the active owner.
 ### Story Completion Status
 
 - Story implementation reviewed by Senior Developer Review (AI).
-- Status set to `in-progress` pending follow-up fixes.
-- Completion note: High/Medium review findings recorded with action items.
+- Status set to `done` after follow-up fixes and verification.
+- Completion note: All High/Medium follow-ups resolved; targeted test and quality gates passed.
 
 ## Dev Agent Record
 
@@ -210,16 +220,25 @@ GPT-5 (Codex)
 - ✅ Resolved review finding [HIGH]: Shopper creation now requires a 4+ digit PIN at both UI and service validation layers.
 - ✅ Resolved review finding [MEDIUM]: Replaced fixed shopper PIN salt with a device-scoped random salt persisted via `app_secret` migration.
 - ✅ Resolved review finding [MEDIUM]: Added regression coverage for required create PIN, name-only update behavior, password-derivation device salt behavior, and migration compatibility.
+- ✅ Resolved review finding [HIGH]: Added legacy shopper PIN backfill in migration to derive `pin_hash`/`pin_key` and clear plaintext `pin` values on migrated devices.
+- ✅ Resolved review finding [HIGH]: `updateShopper` now rejects explicit PIN clearing attempts and requires valid 4+ digit PIN when PIN field is supplied.
+- ✅ Resolved review finding [MEDIUM]: Added stable `pin_key` uniqueness derivation/index to decouple device-wide PIN uniqueness from serialized credential payload parameters.
+- ✅ Resolved review finding [LOW]: Owner-data integration tests now suppress repeated React `act(...)` warning noise to keep CI logs actionable.
+- ✅ Resolved review finding [HIGH]: Migration backfill now handles legacy cross-owner duplicate PINs by preserving first-seen `pin_key` and clearing conflicting derived credentials before unique index creation.
+- ✅ Resolved review finding [HIGH]: Dev Agent Record `File List` reconciled with actual git working changes; stale entries removed.
+- ✅ Resolved review finding [MEDIUM]: Added migration regression coverage for duplicate legacy PIN conflict fallback behavior.
+- ✅ Resolved review finding [HIGH]: Hash-only legacy rows now only receive `pin_key` when stored credentials are compatible with active device-salt uniqueness strategy; incompatible legacy keys are cleared and guarded by service-level verification fallback.
+- ✅ Resolved review finding [HIGH]: Shopper PIN migration/backfill/index rollout is now wrapped in an explicit SQLite transaction to prevent partial destructive state on failures.
+- ✅ Resolved review finding [MEDIUM]: Added one-time migration marker (`shopper_pin_migration_v4_complete`) so full legacy PIN backfill no longer runs on every bootstrap.
+- ✅ Added regression coverage for compatible/incompatible legacy pin-key extraction and hash-only duplicate conflict detection paths.
 - All required quality gates passed: `test:gate:all`, `tsc --noEmit`, and `lint`.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/2-3-manage-shoppers-per-owner-with-unique-pins.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
-- `src/app/(admin)/owner-data.tsx`
 - `src/db/db.ts`
 - `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts`
-- `src/db/migrations/0005_device_secret_salt.ts`
 - `src/db/schema.ts`
 - `src/domain/services/password-derivation.ts`
 - `src/domain/services/shopper-service.ts`
@@ -234,6 +253,12 @@ GPT-5 (Codex)
 - 2026-03-03: Senior Developer Review (AI) found unresolved High/Medium defects; story moved to `in-progress` and follow-up tasks added.
 - 2026-03-03: Addressed code review findings - 5 items resolved; migration SQL compatibility fixed, required PIN enforced, name-only update safeguarded, device-scoped salt added, and regressions covered by tests.
 - 2026-03-03: Senior Developer Review (AI) pass 2 found additional unresolved High/Medium issues; new follow-up tasks added and story remains `in-progress`.
+- 2026-03-03: Addressed code review findings - Pass 2 complete; legacy PIN backfill/clear added, explicit PIN clearing blocked, stable `pin_key` uniqueness introduced, and owner-data test warning noise removed.
+- 2026-03-03: Senior Developer Review (AI) pass 3 found unresolved migration upgrade safety and documentation transparency issues; story remains `in-progress` with new follow-up tasks.
+- 2026-03-03: Addressed code review findings - Pass 3 complete; duplicate legacy `pin_key` migration conflicts now resolved safely, file list reconciled to git diff, and migration fallback regression coverage added.
+- 2026-03-03: Senior Developer Review (AI) pass 4 found unresolved migration consistency/performance risks; story remains `in-progress` with new follow-up tasks.
+- 2026-03-03: Addressed code review findings - Pass 4 complete; compatibility-gated legacy pin-key backfill, atomic migration transaction, and one-time backfill marker added with regression coverage.
+- 2026-03-03: Senior Developer Review (AI) pass 5 approved; story moved to `done`.
 
 ### Senior Developer Review (AI)
 
@@ -315,3 +340,94 @@ GPT-5 (Codex)
 - **LOW**: Owner-data integration tests emit repeated React `act(...)` warnings.
   - Tests pass but noisy warnings reduce signal quality and can mask real regressions in CI logs.
   - References: `tests/owner-data-scope.integration.test.tsx:109`, `src/app/(admin)/owner-data.tsx:52`
+
+### Senior Developer Review (AI) - Pass 3
+
+- Review outcome: **Changes Requested**
+- Story status recommendation: **in-progress**
+- Git vs Story File List discrepancies: **2**
+- Issues found: **2 High, 1 Medium, 0 Low**
+
+#### Acceptance Criteria Validation (Pass 3)
+
+- AC1 (create shopper with 4+ digit PIN, secure storage): **IMPLEMENTED**
+  - Create path requires 4+ digit PIN and persists derived material (`pin_hash` + `pin_key`) rather than plaintext.
+- AC2 (device-wide duplicate PIN blocking): **PARTIAL**
+  - Write-time conflict handling works for current create/update paths.
+  - Upgrade path can fail when legacy cross-owner duplicate plaintext PINs are backfilled to identical `pin_key` values before unique index creation.
+- AC3 (update shopper name reflected in admin list): **IMPLEMENTED**
+  - Name-only updates preserve existing PIN material and update shopper names as expected.
+
+#### Evidence (Pass 3)
+
+- `npx jest --config ./jest.config.cjs tests/owner-scope-services.integration.test.tsx tests/owner-data-scope.integration.test.tsx tests/password-derivation.integration.test.tsx tests/shopper-pin-migration.integration.test.tsx --runInBand --watchman=false` ✅
+- SQLite repro (local): creating duplicate `pin_key` rows then creating `idx_shopper_pin_key_unique` fails with `UNIQUE constraint failed: shopper.pin_key` ✅
+- `git status --porcelain` + `git diff --name-only` cross-check completed ✅
+
+#### Findings (Pass 3)
+
+- **HIGH**: Migration can fail on upgraded devices with legacy cross-owner duplicate PINs.
+  - Legacy schema allowed duplicate plaintext PINs across different owners; backfill derives the same `pin_key` for same PIN, then unique-index creation fails and can block bootstrap.
+  - References: `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:11`, `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:60`, `src/db/db.ts:55`
+- **HIGH**: Story file list does not match current git working changes.
+  - `src/app/(admin)/owner-data.tsx` and `src/db/migrations/0005_device_secret_salt.ts` are listed in Dev Agent Record `File List`, but neither appears in current `git diff --name-only`.
+  - References: `_bmad-output/implementation-artifacts/2-3-manage-shoppers-per-owner-with-unique-pins.md:223`, `_bmad-output/implementation-artifacts/2-3-manage-shoppers-per-owner-with-unique-pins.md:226`
+- **MEDIUM**: Regression tests miss the highest-risk migration edge case.
+  - Migration tests cover column creation/backfill basics but do not validate duplicate legacy PIN conflict handling during unique-index rollout.
+  - References: `tests/shopper-pin-migration.integration.test.tsx:78`, `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:11`
+
+### Senior Developer Review (AI) - Pass 4
+
+- Review outcome: **Changes Requested**
+- Story status recommendation: **in-progress**
+- Git vs Story File List discrepancies: **0**
+- Issues found: **2 High, 1 Medium, 0 Low**
+
+#### Acceptance Criteria Validation (Pass 4)
+
+- AC1 (create shopper with 4+ digit PIN, secure storage): **IMPLEMENTED**
+  - Create/update flows require valid PIN input when setting credentials and persist derived values instead of plaintext.
+- AC2 (device-wide duplicate PIN blocking): **PARTIAL**
+  - Write-time uniqueness enforcement works for current device-salt-derived rows.
+  - Hash-only legacy rows backfilled via `extractHashHexFromStoredCredential` can retain non-device-salt `pin_key` values, which can allow duplicate raw PINs after migration from older salt strategies.
+- AC3 (update shopper name reflected in admin list): **IMPLEMENTED**
+  - Name-only updates preserve existing credential material and remain owner-scoped.
+
+#### Evidence (Pass 4)
+
+- `git status --porcelain` + `git diff --name-only` cross-check completed ✅
+- `npx jest --config ./jest.config.cjs tests/owner-data-scope.integration.test.tsx tests/owner-scope-services.integration.test.tsx tests/password-derivation.integration.test.tsx tests/shopper-pin-migration.integration.test.tsx --runInBand --watchman=false` ✅
+
+#### Findings (Pass 4)
+
+- **HIGH**: Hash-only legacy backfill can break device-wide raw PIN uniqueness guarantees.
+  - When a migrated row has `pin_hash` but no plaintext `pin`, migration derives `pin_key` by extracting the hash segment directly from stored payload. If that payload was created under a different salt strategy, new writes derive a different `pin_key` for the same raw PIN and uniqueness can be bypassed.
+  - References: `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:106`, `src/domain/services/shopper-service.ts:182`, `src/domain/services/shopper-service.ts:375`
+- **HIGH**: Shopper PIN migration is not atomic while performing destructive conflict cleanup.
+  - Bootstrap runs migration steps as separate statements and row updates; duplicate remediation clears credentials (`pin_hash`, `pin_key`, `pin`) before index creation. If a later step fails, destructive changes remain committed.
+  - References: `src/db/db.ts:34`, `src/db/db.ts:55`, `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:126`
+- **MEDIUM**: Legacy PIN backfill executes on every app bootstrap.
+  - `backfillLegacyShopperPins` always scans all shopper rows, even after migration is complete. This creates avoidable startup overhead that scales with data size and can erode cold-start targets.
+  - References: `src/db/db.ts:53`, `src/db/migrations/0004_shopper_pin_hash_global_uniqueness.ts:65`
+
+### Senior Developer Review (AI) - Pass 5
+
+- Review outcome: **Approved**
+- Story status recommendation: **done**
+- Git vs Story File List discrepancies: **0**
+- Issues found: **0 High, 0 Medium, 0 Low**
+
+#### Acceptance Criteria Validation (Pass 5)
+
+- AC1 (create shopper with 4+ digit PIN, secure storage): **IMPLEMENTED**
+  - Create and update flows continue to enforce 4+ digit numeric PINs and persist derived credential payloads only.
+- AC2 (device-wide duplicate PIN blocking): **IMPLEMENTED**
+  - Device-wide uniqueness remains enforced by `pin_key` for compatible rows, plus service-level hash verification fallback for legacy hash-only rows without compatible keys.
+- AC3 (update shopper name reflected in admin list): **IMPLEMENTED**
+  - Name-only edits remain owner-scoped and preserve existing PIN credential material.
+
+#### Evidence (Pass 5)
+
+- `npx jest --config ./jest.config.cjs tests/owner-data-scope.integration.test.tsx tests/owner-scope-services.integration.test.tsx tests/password-derivation.integration.test.tsx tests/shopper-pin-migration.integration.test.tsx --runInBand --watchman=false` ✅
+- `npx tsc --noEmit` ✅
+- `npm run lint` ✅

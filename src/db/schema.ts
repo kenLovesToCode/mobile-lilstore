@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS ${SHOPPER_TABLE} (
   owner_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   pin_hash TEXT,
+  pin_key TEXT,
   -- Legacy column retained for backward-safe local migrations.
   pin TEXT,
   created_at_ms INTEGER NOT NULL,
@@ -102,6 +103,12 @@ export const CREATE_SHOPPER_PIN_HASH_UNIQUE_INDEX_SQL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shopper_pin_hash_unique
 ON ${SHOPPER_TABLE}(pin_hash)
 WHERE pin_hash IS NOT NULL;
+`;
+
+export const CREATE_SHOPPER_PIN_KEY_UNIQUE_INDEX_SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shopper_pin_key_unique
+ON ${SHOPPER_TABLE}(pin_key)
+WHERE pin_key IS NOT NULL;
 `;
 
 export const CREATE_SHOPPER_OWNER_ID_UNIQUE_INDEX_SQL = `

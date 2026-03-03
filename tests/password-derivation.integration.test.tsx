@@ -8,6 +8,9 @@ import {
   DEFAULT_SCRYPT_PARAMS,
   derivePasswordCredentialMaterial,
   deriveShopperPinCredentialMaterial,
+  deriveShopperPinUniquenessKey,
+  extractShopperPinUniquenessKeyFromCredentialIfCompatible,
+  extractHashHexFromStoredCredential,
   verifyPasswordCredentialMaterial,
 } from "@/domain/services/password-derivation";
 
@@ -119,5 +122,65 @@ describe("deriveShopperPinCredentialMaterial", () => {
     await expect(
       deriveShopperPinCredentialMaterial("1234", "not-hex"),
     ).rejects.toThrow("Invalid hex value in stored credential.");
+  });
+});
+
+describe("deriveShopperPinUniquenessKey", () => {
+  it("derives a stable key for the same pin + device salt", async () => {
+    const deviceSaltHex = "00112233445566778899aabbccddeeff";
+
+    const first = await deriveShopperPinUniquenessKey("1234", deviceSaltHex);
+    const second = await deriveShopperPinUniquenessKey("1234", deviceSaltHex);
+
+    expect(first).toBe(second);
+  });
+
+  it("produces different keys for different pins on the same device salt", async () => {
+    const deviceSaltHex = "00112233445566778899aabbccddeeff";
+
+    const first = await deriveShopperPinUniquenessKey("1234", deviceSaltHex);
+    const second = await deriveShopperPinUniquenessKey("1235", deviceSaltHex);
+
+    expect(first).not.toBe(second);
+  });
+});
+
+describe("extractHashHexFromStoredCredential", () => {
+  it("extracts the hash segment from a serialized credential", () => {
+    const hash = extractHashHexFromStoredCredential(
+      "scrypt$N=16384$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff$hash=aabbccdd",
+    );
+
+    expect(hash).toBe("aabbccdd");
+  });
+
+  it("throws when stored credential has no hash segment", () => {
+    expect(() =>
+      extractHashHexFromStoredCredential(
+        "scrypt$N=16384$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff",
+      ),
+    ).toThrow("Invalid stored credential format.");
+  });
+});
+
+describe("extractShopperPinUniquenessKeyFromCredentialIfCompatible", () => {
+  it("returns hash when payload params and salt match device uniqueness strategy", () => {
+    const hashHex = "aabbccdd".repeat(8);
+    const key = extractShopperPinUniquenessKeyFromCredentialIfCompatible(
+      `scrypt$N=16384$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff$hash=${hashHex}`,
+      "00112233445566778899aabbccddeeff",
+    );
+
+    expect(key).toBe(hashHex);
+  });
+
+  it("returns null when payload salt differs from device salt", () => {
+    const hashHex = "aabbccdd".repeat(8);
+    const key = extractShopperPinUniquenessKeyFromCredentialIfCompatible(
+      `scrypt$N=16384$r=8$p=1$dkLen=32$salt=ffffffffffffffffffffffffffffffff$hash=${hashHex}`,
+      "00112233445566778899aabbccddeeff",
+    );
+
+    expect(key).toBeNull();
   });
 });

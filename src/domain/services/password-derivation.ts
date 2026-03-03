@@ -11,6 +11,15 @@ export const DEFAULT_SCRYPT_PARAMS = {
   saltLen: 16,
 } as const;
 
+export const SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS = {
+  // Keep shopper uniqueness derivation params explicit and stable so uniqueness
+  // does not drift if default credential KDF params are tuned later.
+  N: 16384,
+  r: 8,
+  p: 1,
+  dkLen: 32,
+} as const;
+
 const MIN_SCRYPT_N = 64;
 const MAX_SCRYPT_N = 32768;
 const MAX_SCRYPT_R = 16;
@@ -236,4 +245,46 @@ export async function deriveShopperPinCredentialMaterial(
   return derivePasswordCredentialMaterial(pin, {
     salt: hexToBytes(deviceSaltHex),
   });
+}
+
+export async function deriveShopperPinUniquenessKey(
+  pin: string,
+  deviceSaltHex: string,
+) {
+  const material = await derivePasswordCredentialMaterial(pin, {
+    salt: hexToBytes(deviceSaltHex),
+    params: SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS,
+  });
+  return material.hashHex;
+}
+
+export function extractHashHexFromStoredCredential(storageValue: string) {
+  const hashMatch = storageValue.match(/\$hash=([0-9a-f]+)$/i);
+  if (!hashMatch) {
+    throw new Error("Invalid stored credential format.");
+  }
+  return hashMatch[1].toLowerCase();
+}
+
+export function extractShopperPinUniquenessKeyFromCredentialIfCompatible(
+  storageValue: string,
+  deviceSaltHex: string,
+) {
+  const parsed = parseStoredCredential(storageValue);
+  if (
+    parsed.params.N !== SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.N ||
+    parsed.params.r !== SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.r ||
+    parsed.params.p !== SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.p ||
+    parsed.params.dkLen !== SHOPPER_PIN_UNIQUENESS_SCRYPT_PARAMS.dkLen
+  ) {
+    return null;
+  }
+
+  const normalizedDeviceSalt = deviceSaltHex.trim().toLowerCase();
+  const parsedSaltHex = bytesToHex(parsed.salt).toLowerCase();
+  if (parsedSaltHex !== normalizedDeviceSalt) {
+    return null;
+  }
+
+  return bytesToHex(parsed.hash).toLowerCase();
 }

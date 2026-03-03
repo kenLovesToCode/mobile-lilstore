@@ -245,20 +245,23 @@ describe("owner-scoped services", () => {
 
     expect(result.ok).toBe(true);
     expect(mockDb.runAsync).toHaveBeenCalledWith(
-      expect.stringContaining("pin_hash"),
+      expect.stringContaining("pin_hash, pin_key, pin"),
       11,
       "Shopper A",
       expect.stringContaining("scrypt$"),
+      expect.stringMatching(/^[0-9a-f]+$/),
       expect.any(Number),
       expect.any(Number),
     );
     const pinHashArg = mockDb.runAsync.mock.calls[0]?.[3];
+    const pinKeyArg = mockDb.runAsync.mock.calls[0]?.[4];
     expect(pinHashArg).not.toBe("1234");
+    expect(pinKeyArg).not.toBe("1234");
   });
 
   it("returns conflict error for duplicate shopper pin across different owners", async () => {
     mockDb.runAsync.mockRejectedValueOnce(
-      new Error("UNIQUE constraint failed: shopper.pin_hash"),
+      new Error("UNIQUE constraint failed: shopper.pin_key"),
     );
 
     const result = await shopperService.createShopper({
@@ -273,6 +276,37 @@ describe("owner-scoped services", () => {
         message: "A shopper with this PIN already exists on this device.",
       },
     });
+  });
+
+  it("blocks create when legacy hash-only shopper already matches the same pin", async () => {
+    const { deriveShopperPinCredentialMaterial } = require(
+      "@/domain/services/password-derivation"
+    );
+    const legacyMaterial = await deriveShopperPinCredentialMaterial(
+      "1234",
+      "00112233445566778899aabbccddeeff",
+    );
+
+    mockDb.getAllAsync.mockResolvedValueOnce([
+      {
+        id: 444,
+        pin_hash: legacyMaterial.storageValue,
+      },
+    ]);
+
+    const result = await shopperService.createShopper({
+      name: "Shopper A",
+      pin: "1234",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A shopper with this PIN already exists on this device.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
   });
 
   it("blocks shopper update when the next pin conflicts device-wide", async () => {
@@ -292,7 +326,7 @@ describe("owner-scoped services", () => {
       });
     });
     mockDb.runAsync.mockRejectedValueOnce(
-      new Error("UNIQUE constraint failed: shopper.pin_hash"),
+      new Error("UNIQUE constraint failed: shopper.pin_key"),
     );
 
     const result = await shopperService.updateShopper({
@@ -353,6 +387,31 @@ describe("owner-scoped services", () => {
       51,
       11,
     );
+  });
+
+  it("rejects explicit shopper pin clearing on update", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 51,
+      owner_id: 11,
+      name: "Shopper A",
+      created_at_ms: 1,
+      updated_at_ms: 1,
+    });
+
+    const result = await shopperService.updateShopper({
+      shopperId: 51,
+      name: "Renamed Shopper",
+      pin: null,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message: "Shopper PIN must be at least 4 digits.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
   });
 
   it("rejects invalid ledger amounts", async () => {

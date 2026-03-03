@@ -10,6 +10,7 @@ import {
 const mockGetOwnerScopedSnapshot = jest.fn();
 const mockCreateShopper = jest.fn();
 const mockUpdateShopper = jest.fn();
+const originalConsoleError = console.error;
 
 jest.mock("@/domain/services/owner-data-service", () => ({
   getOwnerScopedSnapshot: (...args: unknown[]) =>
@@ -29,7 +30,33 @@ const ROUTES = {
   "(admin)/owner-data": require("../src/app/(admin)/owner-data").default,
 };
 
+async function renderOwnerDataRoute() {
+  renderRouter(ROUTES, { initialUrl: "/owner-data" });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 describe("owner-data owner-scope integration", () => {
+  let consoleErrorSpy: jest.SpyInstance;
+
+  beforeAll(() => {
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation((...args) => {
+      const firstArg = args[0];
+      if (
+        typeof firstArg === "string" &&
+        firstArg.includes("inside a test was not wrapped in act(...)")
+      ) {
+        return;
+      }
+      (originalConsoleError as (...params: unknown[]) => void)(...args);
+    });
+  });
+
+  afterAll(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     clearAdminSession();
@@ -106,7 +133,7 @@ describe("owner-data owner-scope integration", () => {
   });
 
   it("swaps visible data deterministically when active owner changes", async () => {
-    renderRouter(ROUTES, { initialUrl: "/owner-data" });
+    await renderOwnerDataRoute();
 
     await waitFor(() => {
       expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
@@ -126,7 +153,7 @@ describe("owner-data owner-scope integration", () => {
   });
 
   it("validates shopper pin format before create requests", async () => {
-    renderRouter(ROUTES, { initialUrl: "/owner-data" });
+    await renderOwnerDataRoute();
 
     await waitFor(() => {
       expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
@@ -143,7 +170,7 @@ describe("owner-data owner-scope integration", () => {
   });
 
   it("requires shopper pin before create requests", async () => {
-    renderRouter(ROUTES, { initialUrl: "/owner-data" });
+    await renderOwnerDataRoute();
 
     await waitFor(() => {
       expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
@@ -188,7 +215,7 @@ describe("owner-data owner-scope integration", () => {
       },
     });
 
-    renderRouter(ROUTES, { initialUrl: "/owner-data" });
+    await renderOwnerDataRoute();
 
     await waitFor(() => {
       expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
