@@ -27,8 +27,11 @@ import {
 } from "@/domain/services/shopper-service";
 import {
   addShoppingListItem,
+  createAssortedShoppingListItem,
+  listAssortedShoppingListItems,
   listShoppingListItems,
   removeShoppingListItem,
+  updateAssortedShoppingListItem,
   updateShoppingListItem,
   type ShoppingListItem,
 } from "@/domain/services/shopping-list-service";
@@ -87,12 +90,14 @@ export async function getOwnerScopedSnapshot() {
 
 export {
   addShoppingListItem,
+  createAssortedShoppingListItem,
   archiveProduct,
   createProduct,
   createShopper,
   deleteProduct,
   getProductById,
   getShopperById,
+  listAssortedShoppingListItems,
   listProducts,
   listShoppingListItems,
   recordPayment,
@@ -100,6 +105,7 @@ export {
   removeShoppingListItem,
   restoreProduct,
   updateProduct,
+  updateAssortedShoppingListItem,
   updateShopper,
   updateShoppingListItem,
 };

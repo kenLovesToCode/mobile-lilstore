@@ -4,6 +4,8 @@ export const STORE_OWNER_TABLE = "store_owner";
 export const PRODUCT_TABLE = "product";
 export const SHOPPER_TABLE = "shopper";
 export const SHOPPING_LIST_ITEM_TABLE = "shopping_list_item";
+export const SHOPPING_LIST_ASSORTED_ITEM_TABLE = "shopping_list_assorted_item";
+export const SHOPPING_LIST_ASSORTED_MEMBER_TABLE = "shopping_list_assorted_member";
 export const PURCHASE_TABLE = "purchase";
 export const PAYMENT_TABLE = "payment";
 
@@ -150,6 +152,64 @@ ON ${SHOPPING_LIST_ITEM_TABLE}(owner_id, created_at_ms DESC, id DESC);
 export const CREATE_SHOPPING_LIST_ITEM_OWNER_PRODUCT_UNIQUE_INDEX_SQL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shopping_list_item_owner_product_unique
 ON ${SHOPPING_LIST_ITEM_TABLE}(owner_id, product_id);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_ITEM_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS ${SHOPPING_LIST_ASSORTED_ITEM_TABLE} (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id INTEGER NOT NULL,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity > 0),
+  unit_price_cents INTEGER NOT NULL CHECK (typeof(unit_price_cents) = 'integer' AND unit_price_cents >= 0),
+  bundle_qty INTEGER CHECK (bundle_qty IS NULL OR (typeof(bundle_qty) = 'integer' AND bundle_qty >= 2)),
+  bundle_price_cents INTEGER CHECK (bundle_price_cents IS NULL OR (typeof(bundle_price_cents) = 'integer' AND bundle_price_cents > 0)),
+  CHECK (
+    (bundle_qty IS NULL AND bundle_price_cents IS NULL) OR
+    (bundle_qty IS NOT NULL AND bundle_price_cents IS NOT NULL)
+  ),
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES ${STORE_OWNER_TABLE}(id) ON DELETE CASCADE
+);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_ITEM_OWNER_ID_UNIQUE_INDEX_SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shopping_list_assorted_item_owner_id_unique
+ON ${SHOPPING_LIST_ASSORTED_ITEM_TABLE}(owner_id, id);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_ITEM_OWNER_CREATED_AT_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_shopping_list_assorted_item_owner_created_at
+ON ${SHOPPING_LIST_ASSORTED_ITEM_TABLE}(owner_id, created_at_ms DESC, id DESC);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_MEMBER_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE} (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id INTEGER NOT NULL,
+  assorted_item_id INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES ${STORE_OWNER_TABLE}(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_id, assorted_item_id)
+    REFERENCES ${SHOPPING_LIST_ASSORTED_ITEM_TABLE}(owner_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_id, product_id) REFERENCES ${PRODUCT_TABLE}(owner_id, id) ON DELETE RESTRICT
+);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_MEMBER_OWNER_ASST_PRODUCT_UNIQUE_INDEX_SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shopping_list_assorted_member_owner_assorted_product_unique
+ON ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE}(owner_id, assorted_item_id, product_id);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_MEMBER_OWNER_ASST_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_shopping_list_assorted_member_owner_assorted
+ON ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE}(owner_id, assorted_item_id, id DESC);
+`;
+
+export const CREATE_SHOPPING_LIST_ASSORTED_MEMBER_OWNER_PRODUCT_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_shopping_list_assorted_member_owner_product
+ON ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE}(owner_id, product_id);
 `;
 
 export const CREATE_PURCHASE_TABLE_SQL = `

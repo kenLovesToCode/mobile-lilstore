@@ -74,7 +74,8 @@ export default function OwnerDataScreen() {
 
   const firstProduct = snapshot?.products[0] ?? null;
   const firstShopper = snapshot?.shoppers[0] ?? null;
-  const firstListItem = snapshot?.shoppingList[0] ?? null;
+  const firstStandardListItem =
+    snapshot?.shoppingList.find((item) => "productId" in item) ?? null;
 
   const summary = useMemo(
     () => ({
@@ -229,14 +230,14 @@ export default function OwnerDataScreen() {
   }
 
   async function onEditFirstListItem() {
-    if (!firstListItem) {
+    if (!firstStandardListItem) {
       setErrorMessage("Add a shopping list item first.");
       return;
     }
     const result = await updateShoppingListItem({
-      itemId: firstListItem.id,
-      quantity: firstListItem.quantity + 1,
-      unitPriceCents: firstListItem.unitPriceCents,
+      itemId: firstStandardListItem.id,
+      quantity: firstStandardListItem.quantity + 1,
+      unitPriceCents: firstStandardListItem.unitPriceCents,
     });
     if (!result.ok) {
       setErrorMessage(result.error.message);
@@ -374,8 +375,8 @@ export default function OwnerDataScreen() {
             <Text style={styles.buttonText}>Add List Item</Text>
           </Pressable>
           <Pressable
-            style={[styles.button, (!canWrite || !firstListItem) && styles.buttonDisabled]}
-            disabled={!canWrite || !firstListItem}
+            style={[styles.button, (!canWrite || !firstStandardListItem) && styles.buttonDisabled]}
+            disabled={!canWrite || !firstStandardListItem}
             onPress={() => void onEditFirstListItem()}
           >
             <Text style={styles.buttonText}>Edit First List Item</Text>

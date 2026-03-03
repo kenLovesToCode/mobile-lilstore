@@ -9,16 +9,25 @@ import {
 
 const mockListProducts = jest.fn();
 const mockListShoppingListItems = jest.fn();
+const mockListAssortedShoppingListItems = jest.fn();
 const mockAddShoppingListItem = jest.fn();
 const mockUpdateShoppingListItem = jest.fn();
+const mockCreateAssortedShoppingListItem = jest.fn();
+const mockUpdateAssortedShoppingListItem = jest.fn();
 const mockRemoveShoppingListItem = jest.fn();
 const originalConsoleError = console.error;
 
 jest.mock("@/domain/services/owner-data-service", () => ({
   listProducts: (...args: unknown[]) => mockListProducts(...args),
   listShoppingListItems: (...args: unknown[]) => mockListShoppingListItems(...args),
+  listAssortedShoppingListItems: (...args: unknown[]) =>
+    mockListAssortedShoppingListItems(...args),
   addShoppingListItem: (...args: unknown[]) => mockAddShoppingListItem(...args),
   updateShoppingListItem: (...args: unknown[]) => mockUpdateShoppingListItem(...args),
+  createAssortedShoppingListItem: (...args: unknown[]) =>
+    mockCreateAssortedShoppingListItem(...args),
+  updateAssortedShoppingListItem: (...args: unknown[]) =>
+    mockUpdateAssortedShoppingListItem(...args),
   removeShoppingListItem: (...args: unknown[]) => mockRemoveShoppingListItem(...args),
 }));
 
@@ -55,6 +64,20 @@ type ShoppingListItemFixture = {
   updatedAtMs: number;
 };
 
+type AssortedShoppingListItemFixture = {
+  id: number;
+  ownerId: number;
+  name: string;
+  quantity: number;
+  unitPriceCents: number;
+  bundleQty: number | null;
+  bundlePriceCents: number | null;
+  memberProductIds: number[];
+  memberCount: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
 function createDeferredPromise<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((innerResolve) => {
@@ -67,6 +90,7 @@ describe("shopping-list admin route integration", () => {
   let consoleErrorSpy: jest.SpyInstance;
   let ownerProducts: Record<number, ProductFixture[]>;
   let ownerShoppingList: Record<number, ShoppingListItemFixture[]>;
+  let ownerAssortedShoppingList: Record<number, AssortedShoppingListItemFixture[]>;
 
   beforeAll(() => {
     consoleErrorSpy = jest.spyOn(console, "error").mockImplementation((...args) => {
@@ -142,6 +166,10 @@ describe("shopping-list admin route integration", () => {
         },
       ],
     };
+    ownerAssortedShoppingList = {
+      101: [],
+      202: [],
+    };
 
     mockListProducts.mockImplementation(() => {
       const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
@@ -173,9 +201,42 @@ describe("shopping-list admin route integration", () => {
         });
       }
 
+      const ownerId = activeOwner.id;
+      const standardRows = (ownerShoppingList[ownerId] ?? []).map((item) => ({
+        ...item,
+        itemType: "standard" as const,
+      }));
+      const assortedRows = (ownerAssortedShoppingList[ownerId] ?? []).map((item) => ({
+        ...item,
+        itemType: "assorted" as const,
+      }));
+      const mergedRows = [...standardRows, ...assortedRows].sort((a, b) => {
+        if (b.createdAtMs !== a.createdAtMs) {
+          return b.createdAtMs - a.createdAtMs;
+        }
+        return b.id - a.id;
+      });
+
       return Promise.resolve({
         ok: true,
-        value: ownerShoppingList[activeOwner.id] ?? [],
+        value: mergedRows,
+      });
+    });
+    mockListAssortedShoppingListItems.mockImplementation(() => {
+      const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+      if (!activeOwner) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+            message: "Select an active owner before managing owner-scoped data.",
+          },
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        value: ownerAssortedShoppingList[activeOwner.id] ?? [],
       });
     });
 
@@ -292,6 +353,118 @@ describe("shopping-list admin route integration", () => {
         return Promise.resolve({ ok: true, value: updated });
       },
     );
+    mockCreateAssortedShoppingListItem.mockImplementation(
+      ({
+        name,
+        quantity,
+        unitPriceCents,
+        bundleQty,
+        bundlePriceCents,
+        memberProductIds,
+      }: {
+        name: string;
+        quantity: number;
+        unitPriceCents: number;
+        bundleQty?: number | null;
+        bundlePriceCents?: number | null;
+        memberProductIds: number[];
+      }) => {
+        const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+        if (!activeOwner) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+              message: "Select an active owner before managing owner-scoped data.",
+            },
+          });
+        }
+
+        const ownerId = activeOwner.id;
+        const nowMs = Date.now();
+        const nextId =
+          Math.max(0, ...(ownerAssortedShoppingList[ownerId] ?? []).map((item) => item.id)) +
+          1;
+        const created = {
+          id: nextId,
+          ownerId,
+          name,
+          quantity,
+          unitPriceCents,
+          bundleQty: bundleQty ?? null,
+          bundlePriceCents: bundlePriceCents ?? null,
+          memberProductIds: [...memberProductIds],
+          memberCount: memberProductIds.length,
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+        };
+        ownerAssortedShoppingList[ownerId] = [
+          created,
+          ...(ownerAssortedShoppingList[ownerId] ?? []),
+        ];
+
+        return Promise.resolve({ ok: true, value: created });
+      },
+    );
+    mockUpdateAssortedShoppingListItem.mockImplementation(
+      ({
+        itemId,
+        name,
+        quantity,
+        unitPriceCents,
+        bundleQty,
+        bundlePriceCents,
+        memberProductIds,
+      }: {
+        itemId: number;
+        name: string;
+        quantity: number;
+        unitPriceCents: number;
+        bundleQty?: number | null;
+        bundlePriceCents?: number | null;
+        memberProductIds: number[];
+      }) => {
+        const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+        if (!activeOwner) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+              message: "Select an active owner before managing owner-scoped data.",
+            },
+          });
+        }
+
+        const ownerId = activeOwner.id;
+        const current = ownerAssortedShoppingList[ownerId] ?? [];
+        const existing = current.find((item) => item.id === itemId);
+        if (!existing) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_NOT_FOUND",
+              message: "Record not found in the active owner scope.",
+            },
+          });
+        }
+
+        const updated = {
+          ...existing,
+          name,
+          quantity,
+          unitPriceCents,
+          bundleQty: bundleQty ?? null,
+          bundlePriceCents: bundlePriceCents ?? null,
+          memberProductIds: [...memberProductIds],
+          memberCount: memberProductIds.length,
+          updatedAtMs: Date.now(),
+        };
+        ownerAssortedShoppingList[ownerId] = current.map((item) =>
+          item.id === itemId ? updated : item,
+        );
+        return Promise.resolve({ ok: true, value: updated });
+      },
+    );
 
     mockRemoveShoppingListItem.mockImplementation(({ itemId }: { itemId: number }) => {
       const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
@@ -380,6 +553,100 @@ describe("shopping-list admin route integration", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Qty 4 · ₱1.80 · Bundle 2 for ₱1.50")).toBeTruthy();
+    });
+  });
+
+  it("creates assorted shopping-list entries with shared pricing and pooled quantity", async () => {
+    ownerProducts[101] = [
+      ...ownerProducts[101],
+      {
+        id: 3,
+        ownerId: 101,
+        name: "Bread",
+        barcode: "A-3",
+        createdAtMs: 3,
+        updatedAtMs: 3,
+      },
+    ];
+
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Assorted Entry Name"), "Assorted");
+    fireEvent.changeText(screen.getByLabelText("Assorted Unit Price (Centavos)"), "250");
+    fireEvent.changeText(screen.getByLabelText("Assorted Available Quantity"), "8");
+    fireEvent.press(screen.getByLabelText("Toggle Assorted Member Milk"));
+    fireEvent.press(screen.getByLabelText("Toggle Assorted Member Bread"));
+    fireEvent.press(screen.getByLabelText("Submit Create Assorted Shopping List Item"));
+
+    await waitFor(() => {
+      expect(mockCreateAssortedShoppingListItem).toHaveBeenCalledWith({
+        name: "Assorted",
+        quantity: 8,
+        unitPriceCents: 250,
+        bundleQty: null,
+        bundlePriceCents: null,
+        memberProductIds: [1, 3],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Assorted · 2 members")).toBeTruthy();
+    });
+  });
+
+  it("updates assorted shopping-list entries and member selections", async () => {
+    ownerProducts[101] = [
+      ...ownerProducts[101],
+      {
+        id: 3,
+        ownerId: 101,
+        name: "Bread",
+        barcode: "A-3",
+        createdAtMs: 3,
+        updatedAtMs: 3,
+      },
+    ];
+    ownerAssortedShoppingList[101] = [
+      {
+        id: 77,
+        ownerId: 101,
+        name: "Assorted",
+        quantity: 8,
+        unitPriceCents: 250,
+        bundleQty: null,
+        bundlePriceCents: null,
+        memberProductIds: [1, 3],
+        memberCount: 2,
+        createdAtMs: 1,
+        updatedAtMs: 1,
+      },
+    ];
+
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Assorted · 2 members")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Assorted Shopping List Item #77"));
+    fireEvent.changeText(screen.getByLabelText("Edit Assorted Available Quantity"), "6");
+    fireEvent.changeText(screen.getByLabelText("Edit Assorted Unit Price (Centavos)"), "300");
+    fireEvent.press(screen.getByLabelText("Submit Assorted Shopping List Item Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateAssortedShoppingListItem).toHaveBeenCalledWith({
+        itemId: 77,
+        name: "Assorted",
+        quantity: 6,
+        unitPriceCents: 300,
+        bundleQty: null,
+        bundlePriceCents: null,
+        memberProductIds: [1, 3],
+      });
     });
   });
 

@@ -1,5 +1,10 @@
 import { bootstrapDatabase, getDb } from "@/db/db";
-import { PRODUCT_TABLE, SHOPPING_LIST_ITEM_TABLE } from "@/db/schema";
+import {
+  PRODUCT_TABLE,
+  SHOPPING_LIST_ASSORTED_ITEM_TABLE,
+  SHOPPING_LIST_ASSORTED_MEMBER_TABLE,
+  SHOPPING_LIST_ITEM_TABLE,
+} from "@/db/schema";
 import {
   type OwnerScopeResult,
   conflictError,
@@ -12,6 +17,7 @@ import {
 } from "@/domain/services/owner-scope";
 
 type ProductOwnerRow = {
+  id: number;
   owner_id: number;
   archived_at_ms: number | null;
 };
@@ -28,7 +34,28 @@ type ShoppingListItemRow = {
   updated_at_ms: number;
 };
 
-export type ShoppingListItem = {
+type AssortedItemRow = {
+  id: number;
+  owner_id: number;
+  name: string;
+  quantity: number;
+  unit_price_cents: number;
+  bundle_qty: number | null;
+  bundle_price_cents: number | null;
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+type AssortedListRow = AssortedItemRow & {
+  member_count: number;
+};
+
+type AssortedMemberRow = {
+  assorted_item_id: number;
+  product_id: number;
+};
+
+export type StandardShoppingListItem = {
   id: number;
   ownerId: number;
   productId: number;
@@ -38,7 +65,25 @@ export type ShoppingListItem = {
   bundlePriceCents: number | null;
   createdAtMs: number;
   updatedAtMs: number;
+  itemType?: "standard";
 };
+
+export type AssortedShoppingListItem = {
+  id: number;
+  ownerId: number;
+  name: string;
+  quantity: number;
+  unitPriceCents: number;
+  bundleQty: number | null;
+  bundlePriceCents: number | null;
+  memberProductIds: number[];
+  memberCount: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  itemType: "assorted";
+};
+
+export type ShoppingListItem = StandardShoppingListItem | AssortedShoppingListItem;
 
 export type AddShoppingListItemInput = {
   productId: number;
@@ -58,6 +103,27 @@ export type UpdateShoppingListItemInput = {
   nowMs?: number;
 };
 
+export type CreateAssortedShoppingListItemInput = {
+  name: string;
+  quantity: number;
+  unitPriceCents: number;
+  bundleQty?: number | null;
+  bundlePriceCents?: number | null;
+  memberProductIds: number[];
+  nowMs?: number;
+};
+
+export type UpdateAssortedShoppingListItemInput = {
+  itemId: number;
+  name: string;
+  quantity: number;
+  unitPriceCents: number;
+  bundleQty?: number | null;
+  bundlePriceCents?: number | null;
+  memberProductIds: number[];
+  nowMs?: number;
+};
+
 export type RemoveShoppingListItemInput = {
   itemId: number;
 };
@@ -74,8 +140,18 @@ const SHOPPING_LIST_DUPLICATE_PRODUCT_CONFLICT_MESSAGE =
   "This product is already published in the shopping list for the active owner.";
 const SHOPPING_LIST_OWNER_PRODUCT_UNIQUE_INDEX_NAME =
   "idx_shopping_list_item_owner_product_unique";
+const ASSORTED_NAME_INVALID_MESSAGE = "Assorted entry name is required.";
+const ASSORTED_MEMBERS_INVALID_MESSAGE =
+  "Assorted shopping-list entries must include at least two unique active member products for the active owner.";
+const ASSORTED_ARCHIVED_MEMBER_CONFLICT_MESSAGE =
+  "Archived products cannot be members of assorted shopping-list entries. Select active products only.";
+const ASSORTED_MEMBER_UNIQUE_INDEX_NAME =
+  "idx_shopping_list_assorted_member_owner_assorted_product_unique";
 
-function mapItem(row: ShoppingListItemRow): ShoppingListItem {
+function mapStandardItem(
+  row: ShoppingListItemRow,
+  options?: { includeItemType?: boolean },
+): StandardShoppingListItem {
   return {
     id: row.id,
     ownerId: row.owner_id,
@@ -86,13 +162,34 @@ function mapItem(row: ShoppingListItemRow): ShoppingListItem {
     bundlePriceCents: row.bundle_price_cents ?? null,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
+    ...(options?.includeItemType ? { itemType: "standard" as const } : {}),
+  };
+}
+
+function mapAssortedItem(
+  row: AssortedItemRow,
+  memberProductIds: number[],
+): AssortedShoppingListItem {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    quantity: row.quantity,
+    unitPriceCents: row.unit_price_cents,
+    bundleQty: row.bundle_qty ?? null,
+    bundlePriceCents: row.bundle_price_cents ?? null,
+    memberProductIds,
+    memberCount: memberProductIds.length,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+    itemType: "assorted",
   };
 }
 
 async function findProductOwner(productId: number) {
   const db = getDb();
   return db.getFirstAsync<ProductOwnerRow>(
-    `SELECT owner_id, archived_at_ms FROM ${PRODUCT_TABLE} WHERE id = ? LIMIT 1;`,
+    `SELECT id, owner_id, archived_at_ms FROM ${PRODUCT_TABLE} WHERE id = ? LIMIT 1;`,
     productId,
   );
 }
@@ -114,6 +211,44 @@ async function findItem(itemId: number) {
      LIMIT 1;`,
     itemId,
   );
+}
+
+async function findAssortedItem(itemId: number) {
+  const db = getDb();
+  return db.getFirstAsync<AssortedItemRow>(
+    `SELECT id,
+            owner_id,
+            name,
+            quantity,
+            unit_price_cents,
+            bundle_qty,
+            bundle_price_cents,
+            created_at_ms,
+            updated_at_ms
+     FROM ${SHOPPING_LIST_ASSORTED_ITEM_TABLE}
+     WHERE id = ?
+     LIMIT 1;`,
+    itemId,
+  );
+}
+
+async function findAssortedMembers(itemId: number, ownerId: number) {
+  const db = getDb();
+  const rows = await db.getAllAsync<{ product_id: number }>(
+    `SELECT member.product_id
+     FROM ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE} AS member
+     INNER JOIN ${PRODUCT_TABLE} AS product
+       ON product.id = member.product_id
+      AND product.owner_id = member.owner_id
+      AND product.archived_at_ms IS NULL
+     WHERE member.assorted_item_id = ?
+       AND member.owner_id = ?
+     ORDER BY member.id ASC;`,
+    itemId,
+    ownerId,
+  );
+
+  return rows.map((row) => row.product_id);
 }
 
 type BundlePricingValidationResult = {
@@ -200,6 +335,81 @@ function validatePricing(
   return null;
 }
 
+function normalizeAssortedName(name: string) {
+  return name.trim();
+}
+
+function normalizeAssortedMembers(memberProductIds: number[]): number[] | null {
+  if (!Array.isArray(memberProductIds)) {
+    return null;
+  }
+
+  const normalized: number[] = [];
+  const seen = new Set<number>();
+  for (const memberProductId of memberProductIds) {
+    if (!Number.isInteger(memberProductId) || memberProductId <= 0) {
+      return null;
+    }
+    if (seen.has(memberProductId)) {
+      return null;
+    }
+    seen.add(memberProductId);
+    normalized.push(memberProductId);
+  }
+
+  if (normalized.length < 2) {
+    return null;
+  }
+
+  return normalized;
+}
+
+async function validateAssortedMemberProducts(
+  ownerId: number,
+  memberProductIds: number[],
+): Promise<OwnerScopeResult<never> | null> {
+  const db = getDb();
+  const placeholders = memberProductIds.map(() => "?").join(", ");
+  const rows = await db.getAllAsync<ProductOwnerRow>(
+    `SELECT id, owner_id, archived_at_ms
+     FROM ${PRODUCT_TABLE}
+     WHERE id IN (${placeholders});`,
+    ...memberProductIds,
+  );
+
+  const rowById = new Map<number, ProductOwnerRow>();
+  for (const row of rows) {
+    rowById.set(row.id, row);
+  }
+
+  for (const memberProductId of memberProductIds) {
+    const row = rowById.get(memberProductId);
+    if (!row) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+    if (row.owner_id !== ownerId) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_MISMATCH",
+          message: OWNER_SCOPE_MISMATCH_MESSAGE,
+        },
+      };
+    }
+    if (row.archived_at_ms != null) {
+      return conflictError(ASSORTED_ARCHIVED_MEMBER_CONFLICT_MESSAGE);
+    }
+  }
+
+  return null;
+}
+
 function mapAddConflictError(error: unknown): OwnerScopeResult<never> | null {
   if (!(error instanceof Error)) {
     return null;
@@ -221,9 +431,96 @@ function mapAddConflictError(error: unknown): OwnerScopeResult<never> | null {
   return conflictError();
 }
 
+function mapAssortedConflictError(error: unknown): OwnerScopeResult<never> | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const message = error.message ?? "";
+  if (!/UNIQUE constraint failed/i.test(message)) {
+    return null;
+  }
+
+  const duplicateMemberConstraint =
+    message.includes(ASSORTED_MEMBER_UNIQUE_INDEX_NAME) ||
+    /assorted_item_id,\s*product_id/i.test(message);
+
+  if (duplicateMemberConstraint) {
+    return invalidInputError(ASSORTED_MEMBERS_INVALID_MESSAGE);
+  }
+
+  return conflictError();
+}
+
+async function listAssortedRows(ownerId: number): Promise<AssortedListRow[]> {
+  const db = getDb();
+  return db.getAllAsync<AssortedListRow>(
+    `SELECT item.id,
+            item.owner_id,
+            item.name,
+            item.quantity,
+            item.unit_price_cents,
+            item.bundle_qty,
+            item.bundle_price_cents,
+            item.created_at_ms,
+            item.updated_at_ms,
+            COUNT(product.id) AS member_count
+     FROM ${SHOPPING_LIST_ASSORTED_ITEM_TABLE} AS item
+     LEFT JOIN ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE} AS member
+       ON member.assorted_item_id = item.id
+      AND member.owner_id = item.owner_id
+     LEFT JOIN ${PRODUCT_TABLE} AS product
+       ON product.id = member.product_id
+      AND product.owner_id = member.owner_id
+      AND product.archived_at_ms IS NULL
+     WHERE item.owner_id = ?
+     GROUP BY item.id,
+              item.owner_id,
+              item.name,
+              item.quantity,
+              item.unit_price_cents,
+              item.bundle_qty,
+              item.bundle_price_cents,
+              item.created_at_ms,
+              item.updated_at_ms
+     ORDER BY item.created_at_ms DESC, item.id DESC;`,
+    ownerId,
+  );
+}
+
+async function listAssortedMemberRows(ownerId: number): Promise<AssortedMemberRow[]> {
+  const db = getDb();
+  return db.getAllAsync<AssortedMemberRow>(
+    `SELECT member.assorted_item_id, member.product_id
+     FROM ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE} AS member
+     INNER JOIN ${PRODUCT_TABLE} AS product
+       ON product.id = member.product_id
+      AND product.owner_id = member.owner_id
+      AND product.archived_at_ms IS NULL
+     WHERE member.owner_id = ?
+     ORDER BY member.assorted_item_id ASC, member.id ASC;`,
+    ownerId,
+  );
+}
+
+function buildAssortedMemberMap(rows: AssortedMemberRow[]) {
+  const map = new Map<number, number[]>();
+
+  for (const row of rows) {
+    const existing = map.get(row.assorted_item_id);
+    if (existing) {
+      existing.push(row.product_id);
+      continue;
+    }
+    map.set(row.assorted_item_id, [row.product_id]);
+  }
+
+  return map;
+}
+
 export async function addShoppingListItem(
   input: AddShoppingListItemInput,
-): Promise<OwnerScopeResult<ShoppingListItem>> {
+): Promise<OwnerScopeResult<StandardShoppingListItem>> {
   const ownerContext = requireActiveOwnerContext();
   if (!ownerContext.ok) {
     return ownerContext;
@@ -292,7 +589,7 @@ export async function addShoppingListItem(
       };
     }
 
-    return { ok: true, value: mapItem(created) };
+    return { ok: true, value: mapStandardItem(created) };
   } catch (error: unknown) {
     const mappedConflict = mapAddConflictError(error);
     if (mappedConflict) {
@@ -312,9 +609,163 @@ export async function addShoppingListItem(
   }
 }
 
-export async function listShoppingListItems(): Promise<
-  OwnerScopeResult<ShoppingListItem[]>
+export async function createAssortedShoppingListItem(
+  input: CreateAssortedShoppingListItemInput,
+): Promise<OwnerScopeResult<AssortedShoppingListItem>> {
+  const ownerContext = requireActiveOwnerContext();
+  if (!ownerContext.ok) {
+    return ownerContext;
+  }
+
+  await bootstrapDatabase();
+  const db = getDb();
+  const normalizedName = normalizeAssortedName(input.name);
+  if (!normalizedName) {
+    return invalidInputError(ASSORTED_NAME_INVALID_MESSAGE);
+  }
+
+  const invalidPricing = validatePricing(input.quantity, input.unitPriceCents);
+  if (invalidPricing) {
+    return invalidPricing;
+  }
+  const bundlePricing = validateBundlePricing(input.bundleQty, input.bundlePriceCents);
+  if (bundlePricing.invalid) {
+    return bundlePricing.invalid;
+  }
+
+  const normalizedMemberProductIds = normalizeAssortedMembers(input.memberProductIds);
+  if (!normalizedMemberProductIds) {
+    return invalidInputError(ASSORTED_MEMBERS_INVALID_MESSAGE);
+  }
+
+  const memberValidationError = await validateAssortedMemberProducts(
+    ownerContext.value.id,
+    normalizedMemberProductIds,
+  );
+  if (memberValidationError) {
+    return memberValidationError;
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  let inTransaction = false;
+  try {
+    await db.runAsync("BEGIN IMMEDIATE TRANSACTION;");
+    inTransaction = true;
+
+    const insertResult = await db.runAsync(
+      `INSERT INTO ${SHOPPING_LIST_ASSORTED_ITEM_TABLE} (
+         owner_id, name, quantity, unit_price_cents, bundle_qty, bundle_price_cents, created_at_ms, updated_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+      ownerContext.value.id,
+      normalizedName,
+      input.quantity,
+      input.unitPriceCents,
+      bundlePricing.bundleQty,
+      bundlePricing.bundlePriceCents,
+      nowMs,
+      nowMs,
+    );
+
+    const assortedItemId = Number(insertResult.lastInsertRowId);
+    for (const memberProductId of normalizedMemberProductIds) {
+      await db.runAsync(
+        `INSERT INTO ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE} (
+           owner_id, assorted_item_id, product_id, created_at_ms
+         ) VALUES (?, ?, ?, ?);`,
+        ownerContext.value.id,
+        assortedItemId,
+        memberProductId,
+        nowMs,
+      );
+    }
+
+    await db.runAsync("COMMIT;");
+    inTransaction = false;
+
+    const created = await findAssortedItem(assortedItemId);
+    if (!created) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_UNAVAILABLE",
+          message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+        },
+      };
+    }
+
+    const memberProductIds = await findAssortedMembers(assortedItemId, ownerContext.value.id);
+    return {
+      ok: true,
+      value: mapAssortedItem(created, memberProductIds),
+    };
+  } catch (error: unknown) {
+    if (inTransaction) {
+      try {
+        await db.runAsync("ROLLBACK;");
+      } catch {
+        // Preserve original assorted create error if rollback also fails.
+      }
+    }
+
+    const mappedConflict = mapAssortedConflictError(error);
+    if (mappedConflict) {
+      return mappedConflict;
+    }
+
+    console.warn("[shopping-list-service] createAssortedShoppingListItem failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function listAssortedShoppingListItems(): Promise<
+  OwnerScopeResult<AssortedShoppingListItem[]>
 > {
+  const ownerContext = requireActiveOwnerContext();
+  if (!ownerContext.ok) {
+    return ownerContext;
+  }
+
+  await bootstrapDatabase();
+
+  try {
+    const [assortedRows, memberRows] = await Promise.all([
+      listAssortedRows(ownerContext.value.id),
+      listAssortedMemberRows(ownerContext.value.id),
+    ]);
+
+    const memberMap = buildAssortedMemberMap(memberRows);
+    const assortedItems = assortedRows.map((row) => {
+      const memberProductIds = memberMap.get(row.id) ?? [];
+      return mapAssortedItem(row, memberProductIds);
+    });
+
+    return {
+      ok: true,
+      value: assortedItems,
+    };
+  } catch (error: unknown) {
+    console.warn("[shopping-list-service] listAssortedShoppingListItems failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function listShoppingListItems(): Promise<OwnerScopeResult<ShoppingListItem[]>> {
   const ownerContext = requireActiveOwnerContext();
   if (!ownerContext.ok) {
     return ownerContext;
@@ -324,7 +775,7 @@ export async function listShoppingListItems(): Promise<
   const db = getDb();
 
   try {
-    const rows = await db.getAllAsync<ShoppingListItemRow>(
+    const standardRowsPromise = db.getAllAsync<ShoppingListItemRow>(
       `SELECT item.id,
               item.owner_id,
               item.product_id,
@@ -343,7 +794,31 @@ export async function listShoppingListItems(): Promise<
        ORDER BY item.created_at_ms DESC, item.id DESC;`,
       ownerContext.value.id,
     );
-    return { ok: true, value: rows.map(mapItem) };
+
+    const [standardRows, assortedRows, assortedMemberRows] = await Promise.all([
+      standardRowsPromise,
+      listAssortedRows(ownerContext.value.id),
+      listAssortedMemberRows(ownerContext.value.id),
+    ]);
+
+    const standardItems = standardRows.map((row) =>
+      mapStandardItem(row, { includeItemType: true }),
+    );
+    const assortedMemberMap = buildAssortedMemberMap(assortedMemberRows);
+    const assortedItems = assortedRows.map((row) => {
+      const memberProductIds = assortedMemberMap.get(row.id) ?? [];
+      return mapAssortedItem(row, memberProductIds);
+    });
+
+    const allItems: ShoppingListItem[] = [...standardItems, ...assortedItems];
+    allItems.sort((a, b) => {
+      if (b.createdAtMs !== a.createdAtMs) {
+        return b.createdAtMs - a.createdAtMs;
+      }
+      return b.id - a.id;
+    });
+
+    return { ok: true, value: allItems };
   } catch (error: unknown) {
     console.warn("[shopping-list-service] listShoppingListItems failed", {
       reason: getSafeErrorReason(error),
@@ -360,7 +835,7 @@ export async function listShoppingListItems(): Promise<
 
 export async function updateShoppingListItem(
   input: UpdateShoppingListItemInput,
-): Promise<OwnerScopeResult<ShoppingListItem>> {
+): Promise<OwnerScopeResult<StandardShoppingListItem>> {
   const ownerContext = requireActiveOwnerContext();
   if (!ownerContext.ok) {
     return ownerContext;
@@ -456,9 +931,167 @@ export async function updateShoppingListItem(
       };
     }
 
-    return { ok: true, value: mapItem(updated) };
+    return { ok: true, value: mapStandardItem(updated) };
   } catch (error: unknown) {
     console.warn("[shopping-list-service] updateShoppingListItem failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function updateAssortedShoppingListItem(
+  input: UpdateAssortedShoppingListItemInput,
+): Promise<OwnerScopeResult<AssortedShoppingListItem>> {
+  const ownerContext = requireActiveOwnerContext();
+  if (!ownerContext.ok) {
+    return ownerContext;
+  }
+
+  await bootstrapDatabase();
+  const db = getDb();
+  const normalizedName = normalizeAssortedName(input.name);
+  if (!normalizedName) {
+    return invalidInputError(ASSORTED_NAME_INVALID_MESSAGE);
+  }
+
+  const invalidPricing = validatePricing(input.quantity, input.unitPriceCents);
+  if (invalidPricing) {
+    return invalidPricing;
+  }
+
+  const existing = await findAssortedItem(input.itemId);
+  if (!existing) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+      },
+    };
+  }
+  if (existing.owner_id !== ownerContext.value.id) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: OWNER_SCOPE_MISMATCH_MESSAGE,
+      },
+    };
+  }
+
+  const hasBundleInput =
+    input.bundleQty !== undefined || input.bundlePriceCents !== undefined;
+  const providedBundlePricing = hasBundleInput
+    ? validateBundlePricing(input.bundleQty, input.bundlePriceCents)
+    : null;
+  if (providedBundlePricing?.invalid) {
+    return providedBundlePricing.invalid;
+  }
+
+  const normalizedMemberProductIds = normalizeAssortedMembers(input.memberProductIds);
+  if (!normalizedMemberProductIds) {
+    return invalidInputError(ASSORTED_MEMBERS_INVALID_MESSAGE);
+  }
+
+  const memberValidationError = await validateAssortedMemberProducts(
+    ownerContext.value.id,
+    normalizedMemberProductIds,
+  );
+  if (memberValidationError) {
+    return memberValidationError;
+  }
+
+  const bundlePricing = providedBundlePricing ?? {
+    bundleQty: existing.bundle_qty ?? null,
+    bundlePriceCents: existing.bundle_price_cents ?? null,
+    invalid: null,
+  };
+
+  const nowMs = input.nowMs ?? Date.now();
+  let inTransaction = false;
+  try {
+    await db.runAsync("BEGIN IMMEDIATE TRANSACTION;");
+    inTransaction = true;
+
+    await db.runAsync(
+      `UPDATE ${SHOPPING_LIST_ASSORTED_ITEM_TABLE}
+       SET name = ?,
+           quantity = ?,
+           unit_price_cents = ?,
+           bundle_qty = ?,
+           bundle_price_cents = ?,
+           updated_at_ms = ?
+       WHERE id = ? AND owner_id = ?;`,
+      normalizedName,
+      input.quantity,
+      input.unitPriceCents,
+      bundlePricing.bundleQty,
+      bundlePricing.bundlePriceCents,
+      nowMs,
+      input.itemId,
+      ownerContext.value.id,
+    );
+
+    await db.runAsync(
+      `DELETE FROM ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE}
+       WHERE assorted_item_id = ? AND owner_id = ?;`,
+      input.itemId,
+      ownerContext.value.id,
+    );
+
+    for (const memberProductId of normalizedMemberProductIds) {
+      await db.runAsync(
+        `INSERT INTO ${SHOPPING_LIST_ASSORTED_MEMBER_TABLE} (
+           owner_id, assorted_item_id, product_id, created_at_ms
+         ) VALUES (?, ?, ?, ?);`,
+        ownerContext.value.id,
+        input.itemId,
+        memberProductId,
+        nowMs,
+      );
+    }
+
+    await db.runAsync("COMMIT;");
+    inTransaction = false;
+
+    const updated = await findAssortedItem(input.itemId);
+    if (!updated) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+
+    const memberProductIds = await findAssortedMembers(input.itemId, ownerContext.value.id);
+    return {
+      ok: true,
+      value: mapAssortedItem(updated, memberProductIds),
+    };
+  } catch (error: unknown) {
+    if (inTransaction) {
+      try {
+        await db.runAsync("ROLLBACK;");
+      } catch {
+        // Preserve original assorted update error if rollback also fails.
+      }
+    }
+
+    const mappedConflict = mapAssortedConflictError(error);
+    if (mappedConflict) {
+      return mappedConflict;
+    }
+
+    console.warn("[shopping-list-service] updateAssortedShoppingListItem failed", {
       reason: getSafeErrorReason(error),
     });
     return {

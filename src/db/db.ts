@@ -18,6 +18,10 @@ import {
   SHOPPING_LIST_BUNDLE_OFFER_MIGRATION_STATEMENTS,
   ensureShoppingListBundleColumns,
 } from "@/db/migrations/0007_shopping_list_bundle_offer";
+import {
+  SHOPPING_LIST_ASSORTED_GROUP_MIGRATION_STATEMENTS,
+  ensureShoppingListAssortedTables,
+} from "@/db/migrations/0008_shopping_list_assorted_groups";
 
 const DATABASE_NAME = "lilstore.db";
 const db = SQLite.openDatabaseSync(DATABASE_NAME);
@@ -49,6 +53,10 @@ export async function bootstrapDatabase() {
       }
       await ensureShoppingListBundleColumns(db);
       for (const statement of SHOPPING_LIST_BUNDLE_OFFER_MIGRATION_STATEMENTS) {
+        await db.execAsync(statement);
+      }
+      await ensureShoppingListAssortedTables(db);
+      for (const statement of SHOPPING_LIST_ASSORTED_GROUP_MIGRATION_STATEMENTS) {
         await db.execAsync(statement);
       }
       for (const statement of DEVICE_SECRET_SALT_MIGRATION_STATEMENTS) {

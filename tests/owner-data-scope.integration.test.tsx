@@ -16,6 +16,7 @@ const mockRestoreProduct = jest.fn();
 const mockDeleteProduct = jest.fn();
 const mockCreateShopper = jest.fn();
 const mockUpdateShopper = jest.fn();
+const mockUpdateShoppingListItem = jest.fn();
 const originalConsoleError = console.error;
 
 jest.mock("@/domain/services/owner-data-service", () => ({
@@ -32,7 +33,7 @@ jest.mock("@/domain/services/owner-data-service", () => ({
   recordPayment: jest.fn(),
   updateProduct: (...args: unknown[]) => mockUpdateProduct(...args),
   updateShopper: (...args: unknown[]) => mockUpdateShopper(...args),
-  updateShoppingListItem: jest.fn(),
+  updateShoppingListItem: (...args: unknown[]) => mockUpdateShoppingListItem(...args),
 }));
 
 const ROUTES = {
@@ -105,6 +106,7 @@ describe("owner-data owner-scope integration", () => {
     mockDeleteProduct.mockReset();
     mockCreateShopper.mockReset();
     mockUpdateShopper.mockReset();
+    mockUpdateShoppingListItem.mockReset();
     clearAdminSession();
     setAdminSession({ id: 1, username: "admin" });
     setActiveOwner({ id: 101, name: "Owner A" });
@@ -442,6 +444,21 @@ describe("owner-data owner-scope integration", () => {
         updatedAtMs: 2,
       },
     });
+
+    mockUpdateShoppingListItem.mockResolvedValue({
+      ok: true,
+      value: {
+        id: 1,
+        ownerId: 101,
+        productId: 1,
+        quantity: 2,
+        unitPriceCents: 100,
+        bundleQty: null,
+        bundlePriceCents: null,
+        createdAtMs: 1,
+        updatedAtMs: 2,
+      },
+    });
   });
 
   it("swaps visible data deterministically when active owner changes", async () => {
@@ -540,6 +557,72 @@ describe("owner-data owner-scope integration", () => {
       expect(mockUpdateShopper).toHaveBeenCalledWith({
         shopperId: 77,
         name: "Renamed Shopper",
+      });
+    });
+  });
+
+  it("edits the first standard shopping-list item when assorted entries are newer", async () => {
+    mockGetOwnerScopedSnapshot.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        products: [
+          {
+            id: 1,
+            ownerId: 101,
+            name: "Product A",
+            barcode: "A-1",
+            createdAtMs: 1,
+            updatedAtMs: 1,
+          },
+        ],
+        shoppers: [],
+        shoppingList: [
+          {
+            id: 77,
+            ownerId: 101,
+            name: "Assorted",
+            quantity: 3,
+            unitPriceCents: 200,
+            bundleQty: null,
+            bundlePriceCents: null,
+            memberProductIds: [1, 2],
+            memberCount: 2,
+            createdAtMs: 3,
+            updatedAtMs: 3,
+            itemType: "assorted",
+          },
+          {
+            id: 12,
+            ownerId: 101,
+            productId: 1,
+            quantity: 2,
+            unitPriceCents: 100,
+            bundleQty: null,
+            bundlePriceCents: null,
+            createdAtMs: 2,
+            updatedAtMs: 2,
+            itemType: "standard",
+          },
+        ],
+        purchases: [],
+        payments: [],
+        history: [],
+      },
+    });
+
+    await renderOwnerDataRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Edit First List Item"));
+
+    await waitFor(() => {
+      expect(mockUpdateShoppingListItem).toHaveBeenCalledWith({
+        itemId: 12,
+        quantity: 3,
+        unitPriceCents: 100,
       });
     });
   });

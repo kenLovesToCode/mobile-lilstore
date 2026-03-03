@@ -1173,6 +1173,334 @@ describe("owner-scoped services", () => {
     );
   });
 
+  it("creates assorted shopping-list groups with shared pricing, quantity, and member products", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 444,
+          owner_id: 11,
+          archived_at_ms: null,
+        },
+        {
+          id: 555,
+          owner_id: 11,
+          archived_at_ms: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { product_id: 444 },
+        { product_id: 555 },
+      ]);
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 77,
+      owner_id: 11,
+      name: "Assorted",
+      quantity: 8,
+      unit_price_cents: 250,
+      bundle_qty: 3,
+      bundle_price_cents: 600,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync
+      .mockResolvedValueOnce({ changes: 0, lastInsertRowId: 0 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 77 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 1 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 2 })
+      .mockResolvedValueOnce({ changes: 0, lastInsertRowId: 0 });
+
+    const result = await shoppingListService.createAssortedShoppingListItem({
+      name: "Assorted",
+      quantity: 8,
+      unitPriceCents: 250,
+      bundleQty: 3,
+      bundlePriceCents: 600,
+      memberProductIds: [444, 555],
+      nowMs: 100,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 77,
+        ownerId: 11,
+        name: "Assorted",
+        quantity: 8,
+        unitPriceCents: 250,
+        bundleQty: 3,
+        bundlePriceCents: 600,
+        memberProductIds: [444, 555],
+        memberCount: 2,
+        createdAtMs: 100,
+        updatedAtMs: 100,
+        itemType: "assorted",
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO shopping_list_assorted_item"),
+      11,
+      "Assorted",
+      8,
+      250,
+      3,
+      600,
+      100,
+      100,
+    );
+  });
+
+  it("updates assorted shopping-list groups including members and shared pricing", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 77,
+        owner_id: 11,
+        name: "Assorted",
+        quantity: 8,
+        unit_price_cents: 250,
+        bundle_qty: null,
+        bundle_price_cents: null,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({
+        id: 77,
+        owner_id: 11,
+        name: "Assorted",
+        quantity: 5,
+        unit_price_cents: 300,
+        bundle_qty: 2,
+        bundle_price_cents: 500,
+        created_at_ms: 100,
+        updated_at_ms: 200,
+      });
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 444,
+          owner_id: 11,
+          archived_at_ms: null,
+        },
+        {
+          id: 555,
+          owner_id: 11,
+          archived_at_ms: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { product_id: 444 },
+        { product_id: 555 },
+      ]);
+    mockDb.runAsync
+      .mockResolvedValueOnce({ changes: 0, lastInsertRowId: 0 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 0 })
+      .mockResolvedValueOnce({ changes: 2, lastInsertRowId: 0 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 1 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 2 })
+      .mockResolvedValueOnce({ changes: 0, lastInsertRowId: 0 });
+
+    const result = await shoppingListService.updateAssortedShoppingListItem({
+      itemId: 77,
+      name: "Assorted",
+      quantity: 5,
+      unitPriceCents: 300,
+      bundleQty: 2,
+      bundlePriceCents: 500,
+      memberProductIds: [444, 555],
+      nowMs: 200,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 77,
+        ownerId: 11,
+        name: "Assorted",
+        quantity: 5,
+        unitPriceCents: 300,
+        bundleQty: 2,
+        bundlePriceCents: 500,
+        memberProductIds: [444, 555],
+        memberCount: 2,
+        createdAtMs: 100,
+        updatedAtMs: 200,
+        itemType: "assorted",
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE shopping_list_assorted_item"),
+      "Assorted",
+      5,
+      300,
+      2,
+      500,
+      200,
+      77,
+      11,
+    );
+  });
+
+  it("rejects assorted-group writes with fewer than two members", async () => {
+    const createResult = await shoppingListService.createAssortedShoppingListItem({
+      name: "Assorted",
+      quantity: 5,
+      unitPriceCents: 250,
+      memberProductIds: [444],
+    });
+
+    expect(createResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Assorted shopping-list entries must include at least two unique active member products for the active owner.",
+      },
+    });
+    expect(mockDb.getAllAsync).not.toHaveBeenCalled();
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects assorted-group writes when a member product belongs to another owner", async () => {
+    mockDb.getAllAsync.mockResolvedValueOnce([
+      {
+        id: 444,
+        owner_id: 11,
+        archived_at_ms: null,
+      },
+      {
+        id: 555,
+        owner_id: 99,
+        archived_at_ms: null,
+      },
+    ]);
+
+    const createResult = await shoppingListService.createAssortedShoppingListItem({
+      name: "Assorted",
+      quantity: 5,
+      unitPriceCents: 250,
+      memberProductIds: [444, 555],
+    });
+
+    expect(createResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: "The requested record belongs to a different owner.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("lists published shopping-list entries including assorted groups as single rows", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 901,
+          owner_id: 11,
+          product_id: 444,
+          quantity: 3,
+          unit_price_cents: 150,
+          bundle_qty: null,
+          bundle_price_cents: null,
+          created_at_ms: 100,
+          updated_at_ms: 100,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 77,
+          owner_id: 11,
+          name: "Assorted",
+          quantity: 8,
+          unit_price_cents: 250,
+          bundle_qty: null,
+          bundle_price_cents: null,
+          created_at_ms: 120,
+          updated_at_ms: 120,
+          member_count: 2,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { assorted_item_id: 77, product_id: 444 },
+        { assorted_item_id: 77, product_id: 555 },
+      ]);
+
+    const result = await shoppingListService.listShoppingListItems();
+
+    expect(result).toEqual({
+      ok: true,
+      value: [
+        {
+          id: 77,
+          ownerId: 11,
+          name: "Assorted",
+          quantity: 8,
+          unitPriceCents: 250,
+          bundleQty: null,
+          bundlePriceCents: null,
+          memberProductIds: [444, 555],
+          memberCount: 2,
+          createdAtMs: 120,
+          updatedAtMs: 120,
+          itemType: "assorted",
+        },
+        {
+          id: 901,
+          ownerId: 11,
+          productId: 444,
+          quantity: 3,
+          unitPriceCents: 150,
+          bundleQty: null,
+          bundlePriceCents: null,
+          createdAtMs: 100,
+          updatedAtMs: 100,
+          itemType: "standard",
+        },
+      ],
+    });
+  });
+
+  it("keeps assorted groups visible even when active member count drops below two", async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 77,
+          owner_id: 11,
+          name: "Assorted",
+          quantity: 8,
+          unit_price_cents: 250,
+          bundle_qty: null,
+          bundle_price_cents: null,
+          created_at_ms: 120,
+          updated_at_ms: 120,
+          member_count: 1,
+        },
+      ])
+      .mockResolvedValueOnce([{ assorted_item_id: 77, product_id: 444 }]);
+
+    const result = await shoppingListService.listShoppingListItems();
+
+    expect(result).toEqual({
+      ok: true,
+      value: [
+        {
+          id: 77,
+          ownerId: 11,
+          name: "Assorted",
+          quantity: 8,
+          unitPriceCents: 250,
+          bundleQty: null,
+          bundlePriceCents: null,
+          memberProductIds: [444],
+          memberCount: 1,
+          createdAtMs: 120,
+          updatedAtMs: 120,
+          itemType: "assorted",
+        },
+      ],
+    });
+  });
+
   it("keeps owner snapshot shoppingList in sync after successful remove", async () => {
     mockDb.getFirstAsync.mockResolvedValueOnce({
       id: 901,
