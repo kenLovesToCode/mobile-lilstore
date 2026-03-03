@@ -26,7 +26,12 @@ describe("owner-scoped services", () => {
     mockBootstrapDatabase.mockResolvedValue(undefined);
     mockGetDb.mockReturnValue(mockDb);
     mockDb.getAllAsync.mockResolvedValue([]);
-    mockDb.getFirstAsync.mockResolvedValue(null);
+    mockDb.getFirstAsync.mockImplementation((query: string) => {
+      if (query.includes("FROM app_secret")) {
+        return Promise.resolve({ value: "00112233445566778899aabbccddeeff" });
+      }
+      return Promise.resolve(null);
+    });
     mockDb.runAsync.mockResolvedValue({ changes: 1, lastInsertRowId: 1 });
 
     session = require("@/domain/services/admin-session");
@@ -219,6 +224,135 @@ describe("owner-scoped services", () => {
         message: "A product with this barcode already exists for the active owner.",
       },
     });
+  });
+
+  it("stores derived shopper pin payload instead of plaintext pin digits", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({ value: "00112233445566778899aabbccddeeff" })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 90,
+        owner_id: 11,
+        name: "Shopper A",
+        created_at_ms: 1,
+        updated_at_ms: 1,
+      });
+
+    const result = await shopperService.createShopper({
+      name: "Shopper A",
+      pin: "1234",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("pin_hash"),
+      11,
+      "Shopper A",
+      expect.stringContaining("scrypt$"),
+      expect.any(Number),
+      expect.any(Number),
+    );
+    const pinHashArg = mockDb.runAsync.mock.calls[0]?.[3];
+    expect(pinHashArg).not.toBe("1234");
+  });
+
+  it("returns conflict error for duplicate shopper pin across different owners", async () => {
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error("UNIQUE constraint failed: shopper.pin_hash"),
+    );
+
+    const result = await shopperService.createShopper({
+      name: "Shopper A",
+      pin: "1234",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A shopper with this PIN already exists on this device.",
+      },
+    });
+  });
+
+  it("blocks shopper update when the next pin conflicts device-wide", async () => {
+    mockDb.getFirstAsync.mockImplementation((query: string) => {
+      if (query.includes("FROM app_secret")) {
+        return Promise.resolve({ value: "00112233445566778899aabbccddeeff" });
+      }
+      if (query.includes("WHERE pin = ?")) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve({
+        id: 51,
+        owner_id: 11,
+        name: "Owner A shopper",
+        created_at_ms: 1,
+        updated_at_ms: 1,
+      });
+    });
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error("UNIQUE constraint failed: shopper.pin_hash"),
+    );
+
+    const result = await shopperService.updateShopper({
+      shopperId: 51,
+      name: "Renamed Shopper",
+      pin: "1234",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A shopper with this PIN already exists on this device.",
+      },
+    });
+  });
+
+  it("requires shopper pin when creating shoppers", async () => {
+    const result = await shopperService.createShopper({
+      name: "Shopper A",
+      pin: "",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message: "Shopper PIN must be at least 4 digits.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("updates shopper name without clearing pin hash when pin is omitted", async () => {
+    mockDb.getFirstAsync.mockImplementation((query: string) => {
+      if (!query.includes("FROM shopper")) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve({
+        id: 51,
+        owner_id: 11,
+        name: "Renamed Shopper",
+        created_at_ms: 1,
+        updated_at_ms: 2,
+      });
+    });
+
+    const result = await shopperService.updateShopper({
+      shopperId: 51,
+      name: "Renamed Shopper",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.not.stringContaining("pin_hash"),
+      "Renamed Shopper",
+      expect.any(Number),
+      51,
+      11,
+    );
   });
 
   it("rejects invalid ledger amounts", async () => {

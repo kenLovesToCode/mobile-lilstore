@@ -40,8 +40,10 @@ export default function OwnerDataScreen() {
   const [productName, setProductName] = useState("");
   const [productBarcode, setProductBarcode] = useState("");
   const [shopperName, setShopperName] = useState("");
+  const [shopperPin, setShopperPin] = useState("");
   const [renameProduct, setRenameProduct] = useState("");
   const [renameShopper, setRenameShopper] = useState("");
+  const [renameShopperPin, setRenameShopperPin] = useState("");
   const [refreshCount, setRefreshCount] = useState(0);
 
   const canWrite = Boolean(activeOwner);
@@ -86,6 +88,21 @@ export default function OwnerDataScreen() {
     [snapshot],
   );
 
+  function normalizeShopperPin(pin: string) {
+    const normalized = pin.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  function hasValidShopperPin(
+    pin: string | null,
+    options?: { required?: boolean },
+  ) {
+    if (pin == null) {
+      return !options?.required;
+    }
+    return /^\d{4,}$/.test(pin);
+  }
+
   async function onCreateProduct() {
     const result = await createProduct({
       name: productName,
@@ -101,14 +118,23 @@ export default function OwnerDataScreen() {
   }
 
   async function onCreateShopper() {
+    const normalizedPin = normalizeShopperPin(shopperPin);
+    if (!hasValidShopperPin(normalizedPin, { required: true })) {
+      setErrorMessage("Shopper PIN must be at least 4 digits.");
+      return;
+    }
+
     const result = await createShopper({
       name: shopperName,
+      pin: normalizedPin,
     });
     if (!result.ok) {
       setErrorMessage(result.error.message);
       return;
     }
+    setErrorMessage(null);
     setShopperName("");
+    setShopperPin("");
     setRefreshCount((value) => value + 1);
   }
 
@@ -182,15 +208,23 @@ export default function OwnerDataScreen() {
     if (!firstShopper || !renameShopper.trim()) {
       return;
     }
+    const normalizedPin = normalizeShopperPin(renameShopperPin);
+    if (!hasValidShopperPin(normalizedPin)) {
+      setErrorMessage("Shopper PIN must be at least 4 digits.");
+      return;
+    }
     const result = await updateShopper({
       shopperId: firstShopper.id,
       name: renameShopper.trim(),
+      ...(normalizedPin == null ? {} : { pin: normalizedPin }),
     });
     if (!result.ok) {
       setErrorMessage(result.error.message);
       return;
     }
+    setErrorMessage(null);
     setRenameShopper("");
+    setRenameShopperPin("");
     setRefreshCount((value) => value + 1);
   }
 
@@ -290,6 +324,14 @@ export default function OwnerDataScreen() {
             value={shopperName}
             onChangeText={setShopperName}
           />
+          <TextInput
+            accessibilityLabel="Shopper PIN"
+            style={styles.input}
+            placeholder="PIN (4+ digits)"
+            keyboardType="number-pad"
+            value={shopperPin}
+            onChangeText={setShopperPin}
+          />
           <Pressable
             style={[styles.button, !canWrite && styles.buttonDisabled]}
             disabled={!canWrite}
@@ -303,6 +345,14 @@ export default function OwnerDataScreen() {
             placeholder="Rename first shopper"
             value={renameShopper}
             onChangeText={setRenameShopper}
+          />
+          <TextInput
+            accessibilityLabel="Update Shopper PIN"
+            style={styles.input}
+            placeholder="New PIN (optional)"
+            keyboardType="number-pad"
+            value={renameShopperPin}
+            onChangeText={setRenameShopperPin}
           />
           <Pressable
             style={[styles.button, (!canWrite || !firstShopper) && styles.buttonDisabled]}

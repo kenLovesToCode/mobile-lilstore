@@ -228,3 +228,12 @@ export async function verifyPasswordCredentialMaterial(
 
   return constantTimeBytesEqual(parsed.hash, derivedBytes);
 }
+
+export async function deriveShopperPinCredentialMaterial(
+  pin: string,
+  deviceSaltHex: string,
+) {
+  return derivePasswordCredentialMaterial(pin, {
+    salt: hexToBytes(deviceSaltHex),
+  });
+}

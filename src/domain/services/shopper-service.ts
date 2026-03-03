@@ -1,5 +1,6 @@
 import { bootstrapDatabase, getDb } from "@/db/db";
-import { SHOPPER_TABLE } from "@/db/schema";
+import { APP_SECRET_TABLE, SHOPPER_TABLE } from "@/db/schema";
+import { deriveShopperPinCredentialMaterial } from "@/domain/services/password-derivation";
 import {
   type OwnerScopeResult,
   conflictError,
@@ -36,6 +37,7 @@ export type CreateShopperInput = {
 export type UpdateShopperInput = {
   shopperId: number;
   name: string;
+  pin?: string | null;
   nowMs?: number;
 };
 
@@ -62,10 +64,10 @@ function normalizePin(pin: string | null | undefined) {
 }
 
 const SHOPPER_NAME_INVALID_MESSAGE = "Shopper name is required.";
-const SHOPPER_PIN_INVALID_MESSAGE =
-  "Shopper PIN must be at least 4 digits when provided.";
+const SHOPPER_PIN_INVALID_MESSAGE = "Shopper PIN must be at least 4 digits.";
 const SHOPPER_PIN_CONFLICT_MESSAGE =
-  "A shopper with this PIN already exists for the active owner.";
+  "A shopper with this PIN already exists on this device.";
+const SHOPPER_PIN_SALT_SECRET_KEY = "shopper_pin_salt_hex";
 
 async function findShopperById(shopperId: number) {
   const db = getDb();
@@ -78,6 +80,32 @@ async function findShopperById(shopperId: number) {
   );
 }
 
+async function findShopperWithLegacyPin(
+  pin: string,
+  excludeShopperId?: number,
+): Promise<{ id: number } | null> {
+  const db = getDb();
+  if (typeof excludeShopperId === "number") {
+    return db.getFirstAsync<{ id: number }>(
+      `SELECT id
+       FROM ${SHOPPER_TABLE}
+       WHERE pin = ?
+         AND id != ?
+       LIMIT 1;`,
+      pin,
+      excludeShopperId,
+    );
+  }
+
+  return db.getFirstAsync<{ id: number }>(
+    `SELECT id
+     FROM ${SHOPPER_TABLE}
+     WHERE pin = ?
+     LIMIT 1;`,
+    pin,
+  );
+}
+
 function validateShopperName(name: string): OwnerScopeResult<never> | null {
   if (!name) {
     return invalidInputError(SHOPPER_NAME_INVALID_MESSAGE);
@@ -86,8 +114,14 @@ function validateShopperName(name: string): OwnerScopeResult<never> | null {
   return null;
 }
 
-function validatePin(pin: string | null): OwnerScopeResult<never> | null {
+function validatePin(
+  pin: string | null,
+  options?: { required?: boolean },
+): OwnerScopeResult<never> | null {
   if (pin == null) {
+    if (options?.required) {
+      return invalidInputError(SHOPPER_PIN_INVALID_MESSAGE);
+    }
     return null;
   }
 
@@ -96,6 +130,23 @@ function validatePin(pin: string | null): OwnerScopeResult<never> | null {
   }
 
   return null;
+}
+
+async function getDeviceShopperPinSalt() {
+  const db = getDb();
+  const row = await db.getFirstAsync<{ value: string }>(
+    `SELECT value
+     FROM ${APP_SECRET_TABLE}
+     WHERE key = ?
+     LIMIT 1;`,
+    SHOPPER_PIN_SALT_SECRET_KEY,
+  );
+
+  if (!row?.value) {
+    throw new Error("Device shopper PIN salt is unavailable.");
+  }
+
+  return row.value;
 }
 
 export async function createShopper(
@@ -115,19 +166,33 @@ export async function createShopper(
   if (nameError) {
     return nameError;
   }
-  const pinError = validatePin(normalizedPin);
+  const pinError = validatePin(normalizedPin, { required: true });
   if (pinError) {
     return pinError;
   }
-
   try {
+    if (normalizedPin == null) {
+      return invalidInputError(SHOPPER_PIN_INVALID_MESSAGE);
+    }
+
+    const deviceSalt = await getDeviceShopperPinSalt();
+    const derivedPinMaterial = await deriveShopperPinCredentialMaterial(
+      normalizedPin,
+      deviceSalt,
+    );
+
+    const conflictingLegacyPin = await findShopperWithLegacyPin(normalizedPin);
+    if (conflictingLegacyPin) {
+      return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
+    }
+
     const insertResult = await db.runAsync(
       `INSERT INTO ${SHOPPER_TABLE} (
-         owner_id, name, pin, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?, ?);`,
+         owner_id, name, pin_hash, pin, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, NULL, ?, ?);`,
       ownerContext.value.id,
       normalizedName,
-      normalizedPin,
+      derivedPinMaterial?.storageValue ?? null,
       nowMs,
       nowMs,
     );
@@ -254,9 +319,17 @@ export async function updateShopper(
   const db = getDb();
   const existing = await findShopperById(input.shopperId);
   const normalizedName = normalize(input.name);
+  const shouldUpdatePin = Object.prototype.hasOwnProperty.call(input, "pin");
+  const normalizedPin = shouldUpdatePin ? normalizePin(input.pin) : undefined;
   const nameError = validateShopperName(normalizedName);
   if (nameError) {
     return nameError;
+  }
+  if (shouldUpdatePin) {
+    const pinError = validatePin(normalizedPin ?? null);
+    if (pinError) {
+      return pinError;
+    }
   }
 
   if (!existing) {
@@ -280,15 +353,43 @@ export async function updateShopper(
   }
 
   try {
-    await db.runAsync(
-      `UPDATE ${SHOPPER_TABLE}
-       SET name = ?, updated_at_ms = ?
-       WHERE id = ? AND owner_id = ?;`,
-      normalizedName,
-      input.nowMs ?? Date.now(),
-      input.shopperId,
-      ownerContext.value.id,
-    );
+    if (normalizedPin != null) {
+      const conflictingLegacyPin = await findShopperWithLegacyPin(
+        normalizedPin,
+        input.shopperId,
+      );
+      if (conflictingLegacyPin) {
+        return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
+      }
+    }
+
+    if (shouldUpdatePin) {
+      const deviceSalt = await getDeviceShopperPinSalt();
+      const derivedPinMaterial =
+        normalizedPin == null
+          ? null
+          : await deriveShopperPinCredentialMaterial(normalizedPin, deviceSalt);
+      await db.runAsync(
+        `UPDATE ${SHOPPER_TABLE}
+         SET name = ?, pin_hash = ?, pin = NULL, updated_at_ms = ?
+         WHERE id = ? AND owner_id = ?;`,
+        normalizedName,
+        derivedPinMaterial?.storageValue ?? null,
+        input.nowMs ?? Date.now(),
+        input.shopperId,
+        ownerContext.value.id,
+      );
+    } else {
+      await db.runAsync(
+        `UPDATE ${SHOPPER_TABLE}
+         SET name = ?, updated_at_ms = ?
+         WHERE id = ? AND owner_id = ?;`,
+        normalizedName,
+        input.nowMs ?? Date.now(),
+        input.shopperId,
+        ownerContext.value.id,
+      );
+    }
 
     const updated = await findShopperById(input.shopperId);
     if (!updated) {
@@ -302,6 +403,9 @@ export async function updateShopper(
     }
     return { ok: true, value: mapShopper(updated) };
   } catch (error: unknown) {
+    if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) {
+      return conflictError(SHOPPER_PIN_CONFLICT_MESSAGE);
+    }
     console.warn("[shopper-service] updateShopper failed", {
       reason: getSafeErrorReason(error),
     });

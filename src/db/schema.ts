@@ -1,4 +1,5 @@
 export const ADMIN_TABLE = "admin";
+export const APP_SECRET_TABLE = "app_secret";
 export const STORE_OWNER_TABLE = "store_owner";
 export const PRODUCT_TABLE = "product";
 export const SHOPPER_TABLE = "shopper";
@@ -14,6 +15,15 @@ CREATE TABLE IF NOT EXISTS ${ADMIN_TABLE} (
   password_hash TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL
+);
+`;
+
+export const CREATE_APP_SECRET_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS ${APP_SECRET_TABLE} (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  updated_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
 );
 `;
 
@@ -68,6 +78,8 @@ CREATE TABLE IF NOT EXISTS ${SHOPPER_TABLE} (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   owner_id INTEGER NOT NULL,
   name TEXT NOT NULL,
+  pin_hash TEXT,
+  -- Legacy column retained for backward-safe local migrations.
   pin TEXT,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
@@ -84,6 +96,12 @@ export const CREATE_SHOPPER_OWNER_PIN_UNIQUE_INDEX_SQL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shopper_owner_pin_unique
 ON ${SHOPPER_TABLE}(owner_id, pin)
 WHERE pin IS NOT NULL;
+`;
+
+export const CREATE_SHOPPER_PIN_HASH_UNIQUE_INDEX_SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shopper_pin_hash_unique
+ON ${SHOPPER_TABLE}(pin_hash)
+WHERE pin_hash IS NOT NULL;
 `;
 
 export const CREATE_SHOPPER_OWNER_ID_UNIQUE_INDEX_SQL = `

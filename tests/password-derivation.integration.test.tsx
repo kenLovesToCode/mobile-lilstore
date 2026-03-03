@@ -7,6 +7,7 @@ jest.mock("expo-crypto", () => ({
 import {
   DEFAULT_SCRYPT_PARAMS,
   derivePasswordCredentialMaterial,
+  deriveShopperPinCredentialMaterial,
   verifyPasswordCredentialMaterial,
 } from "@/domain/services/password-derivation";
 
@@ -101,5 +102,22 @@ describe("verifyPasswordCredentialMaterial", () => {
         "scrypt$N=65536$r=8$p=1$dkLen=32$salt=00112233445566778899aabbccddeeff$hash=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
       ),
     ).rejects.toThrow("Unsupported scrypt parameters.");
+  });
+});
+
+describe("deriveShopperPinCredentialMaterial", () => {
+  it("derives stable shopper PIN credentials for a device-scoped salt", async () => {
+    const deviceSaltHex = "00112233445566778899aabbccddeeff";
+
+    const first = await deriveShopperPinCredentialMaterial("1234", deviceSaltHex);
+    const second = await deriveShopperPinCredentialMaterial("1234", deviceSaltHex);
+
+    expect(first.storageValue).toBe(second.storageValue);
+  });
+
+  it("throws when the device-scoped salt is malformed", async () => {
+    await expect(
+      deriveShopperPinCredentialMaterial("1234", "not-hex"),
+    ).rejects.toThrow("Invalid hex value in stored credential.");
   });
 });
