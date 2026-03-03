@@ -371,6 +371,8 @@ describe("owner-scoped services", () => {
         product_id: 444,
         quantity: 1,
         unit_price_cents: 100,
+        bundle_qty: null,
+        bundle_price_cents: null,
         created_at_ms: 701,
         updated_at_ms: 701,
       })
@@ -380,6 +382,8 @@ describe("owner-scoped services", () => {
         product_id: 444,
         quantity: 1,
         unit_price_cents: 100,
+        bundle_qty: null,
+        bundle_price_cents: null,
         created_at_ms: 701,
         updated_at_ms: 701,
       })
@@ -393,6 +397,8 @@ describe("owner-scoped services", () => {
         product_id: 444,
         quantity: 2,
         unit_price_cents: 100,
+        bundle_qty: null,
+        bundle_price_cents: null,
         created_at_ms: 701,
         updated_at_ms: 702,
       });
@@ -427,6 +433,8 @@ describe("owner-scoped services", () => {
         productId: 444,
         quantity: 1,
         unitPriceCents: 100,
+        bundleQty: null,
+        bundlePriceCents: null,
         createdAtMs: 701,
         updatedAtMs: 701,
       },
@@ -439,6 +447,8 @@ describe("owner-scoped services", () => {
         productId: 444,
         quantity: 2,
         unitPriceCents: 100,
+        bundleQty: null,
+        bundlePriceCents: null,
         createdAtMs: 701,
         updatedAtMs: 702,
       },
@@ -687,6 +697,8 @@ describe("owner-scoped services", () => {
         product_id: 444,
         quantity: 3,
         unit_price_cents: 199,
+        bundle_qty: 3,
+        bundle_price_cents: 500,
         created_at_ms: 100,
         updated_at_ms: 100,
       });
@@ -699,6 +711,8 @@ describe("owner-scoped services", () => {
       productId: 444,
       quantity: 3,
       unitPriceCents: 199,
+      bundleQty: 3,
+      bundlePriceCents: 500,
       nowMs: 100,
     });
 
@@ -710,6 +724,8 @@ describe("owner-scoped services", () => {
         productId: 444,
         quantity: 3,
         unitPriceCents: 199,
+        bundleQty: 3,
+        bundlePriceCents: 500,
         createdAtMs: 100,
         updatedAtMs: 100,
       },
@@ -720,6 +736,8 @@ describe("owner-scoped services", () => {
       444,
       3,
       199,
+      3,
+      500,
       100,
       100,
     );
@@ -761,6 +779,8 @@ describe("owner-scoped services", () => {
         product_id: 444,
         quantity: 3,
         unit_price_cents: 199,
+        bundle_qty: null,
+        bundle_price_cents: null,
         created_at_ms: 100,
         updated_at_ms: 100,
       })
@@ -774,6 +794,8 @@ describe("owner-scoped services", () => {
         product_id: 444,
         quantity: 5,
         unit_price_cents: 250,
+        bundle_qty: 2,
+        bundle_price_cents: 425,
         created_at_ms: 100,
         updated_at_ms: 200,
       });
@@ -782,6 +804,8 @@ describe("owner-scoped services", () => {
       itemId: 901,
       quantity: 5,
       unitPriceCents: 250,
+      bundleQty: 2,
+      bundlePriceCents: 425,
       nowMs: 200,
     });
 
@@ -793,6 +817,8 @@ describe("owner-scoped services", () => {
         productId: 444,
         quantity: 5,
         unitPriceCents: 250,
+        bundleQty: 2,
+        bundlePriceCents: 425,
         createdAtMs: 100,
         updatedAtMs: 200,
       },
@@ -801,10 +827,173 @@ describe("owner-scoped services", () => {
       expect.stringContaining("UPDATE shopping_list_item"),
       5,
       250,
+      2,
+      425,
       200,
       901,
       11,
     );
+  });
+
+  it("preserves existing bundle offer when update input omits bundle fields", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 901,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 3,
+        unit_price_cents: 199,
+        bundle_qty: 3,
+        bundle_price_cents: 500,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({
+        owner_id: 11,
+        archived_at_ms: null,
+      })
+      .mockResolvedValueOnce({
+        id: 901,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 4,
+        unit_price_cents: 225,
+        bundle_qty: 3,
+        bundle_price_cents: 500,
+        created_at_ms: 100,
+        updated_at_ms: 300,
+      });
+
+    const result = await shoppingListService.updateShoppingListItem({
+      itemId: 901,
+      quantity: 4,
+      unitPriceCents: 225,
+      nowMs: 300,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 901,
+        ownerId: 11,
+        productId: 444,
+        quantity: 4,
+        unitPriceCents: 225,
+        bundleQty: 3,
+        bundlePriceCents: 500,
+        createdAtMs: 100,
+        updatedAtMs: 300,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE shopping_list_item"),
+      4,
+      225,
+      3,
+      500,
+      300,
+      901,
+      11,
+    );
+  });
+
+  it("rejects shopping-list bundle inputs when only one bundle field is provided", async () => {
+    const addResult = await shoppingListService.addShoppingListItem({
+      productId: 444,
+      quantity: 3,
+      unitPriceCents: 199,
+      bundleQty: 3,
+    });
+    const updateResult = await shoppingListService.updateShoppingListItem({
+      itemId: 901,
+      quantity: 5,
+      unitPriceCents: 250,
+      bundlePriceCents: 500,
+    });
+    const updateWithNullBundleQtyResult = await shoppingListService.updateShoppingListItem({
+      itemId: 901,
+      quantity: 5,
+      unitPriceCents: 250,
+      bundleQty: null,
+    });
+    const updateWithNullBundlePriceResult =
+      await shoppingListService.updateShoppingListItem({
+        itemId: 901,
+        quantity: 5,
+        unitPriceCents: 250,
+        bundlePriceCents: null,
+      });
+
+    expect(addResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+      },
+    });
+    expect(updateResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+      },
+    });
+    expect(updateWithNullBundleQtyResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+      },
+    });
+    expect(updateWithNullBundlePriceResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+      },
+    });
+    expect(mockDb.getFirstAsync).not.toHaveBeenCalled();
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects shopping-list bundle inputs with invalid bundle bounds", async () => {
+    const createResult = await shoppingListService.addShoppingListItem({
+      productId: 444,
+      quantity: 3,
+      unitPriceCents: 199,
+      bundleQty: 1,
+      bundlePriceCents: 500,
+    });
+    const updateResult = await shoppingListService.updateShoppingListItem({
+      itemId: 901,
+      quantity: 5,
+      unitPriceCents: 250,
+      bundleQty: 3,
+      bundlePriceCents: 0,
+    });
+
+    expect(createResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+      },
+    });
+    expect(updateResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message:
+          "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+      },
+    });
+    expect(mockDb.getFirstAsync).not.toHaveBeenCalled();
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
   });
 
   it("removes shopping-list items in active owner scope", async () => {
@@ -1164,6 +1353,21 @@ describe("owner-scoped services", () => {
     );
     expect(schema.CREATE_SHOPPING_LIST_ITEM_OWNER_PRODUCT_UNIQUE_INDEX_SQL).toContain(
       "owner_id, product_id",
+    );
+  });
+
+  it("keeps shopping-list bundle constraints enforced at the DB schema boundary", () => {
+    const schema = require("@/db/schema");
+
+    expect(schema.CREATE_SHOPPING_LIST_ITEM_TABLE_SQL).toContain("bundle_qty INTEGER");
+    expect(schema.CREATE_SHOPPING_LIST_ITEM_TABLE_SQL).toContain(
+      "bundle_price_cents INTEGER",
+    );
+    expect(schema.CREATE_SHOPPING_LIST_ITEM_TABLE_SQL).toContain(
+      "(bundle_qty IS NULL AND bundle_price_cents IS NULL)",
+    );
+    expect(schema.CREATE_SHOPPING_LIST_ITEM_TABLE_SQL).toContain(
+      "(bundle_qty IS NOT NULL AND bundle_price_cents IS NOT NULL)",
     );
   });
 

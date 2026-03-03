@@ -129,6 +129,12 @@ CREATE TABLE IF NOT EXISTS ${SHOPPING_LIST_ITEM_TABLE} (
   product_id INTEGER NOT NULL,
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+  bundle_qty INTEGER CHECK (bundle_qty IS NULL OR (typeof(bundle_qty) = 'integer' AND bundle_qty >= 2)),
+  bundle_price_cents INTEGER CHECK (bundle_price_cents IS NULL OR (typeof(bundle_price_cents) = 'integer' AND bundle_price_cents > 0)),
+  CHECK (
+    (bundle_qty IS NULL AND bundle_price_cents IS NULL) OR
+    (bundle_qty IS NOT NULL AND bundle_price_cents IS NOT NULL)
+  ),
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES ${STORE_OWNER_TABLE}(id) ON DELETE CASCADE,

@@ -49,6 +49,8 @@ type ShoppingListItemFixture = {
   productId: number;
   quantity: number;
   unitPriceCents: number;
+  bundleQty: number | null;
+  bundlePriceCents: number | null;
   createdAtMs: number;
   updatedAtMs: number;
 };
@@ -120,6 +122,8 @@ describe("shopping-list admin route integration", () => {
           productId: 1,
           quantity: 2,
           unitPriceCents: 100,
+          bundleQty: null,
+          bundlePriceCents: null,
           createdAtMs: 1,
           updatedAtMs: 1,
         },
@@ -131,6 +135,8 @@ describe("shopping-list admin route integration", () => {
           productId: 2,
           quantity: 1,
           unitPriceCents: 300,
+          bundleQty: null,
+          bundlePriceCents: null,
           createdAtMs: 2,
           updatedAtMs: 2,
         },
@@ -174,7 +180,19 @@ describe("shopping-list admin route integration", () => {
     });
 
     mockAddShoppingListItem.mockImplementation(
-      ({ productId, quantity, unitPriceCents }: { productId: number; quantity: number; unitPriceCents: number }) => {
+      ({
+        productId,
+        quantity,
+        unitPriceCents,
+        bundleQty,
+        bundlePriceCents,
+      }: {
+        productId: number;
+        quantity: number;
+        unitPriceCents: number;
+        bundleQty?: number | null;
+        bundlePriceCents?: number | null;
+      }) => {
         const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
         if (!activeOwner) {
           return Promise.resolve({
@@ -196,6 +214,8 @@ describe("shopping-list admin route integration", () => {
           productId,
           quantity,
           unitPriceCents,
+          bundleQty: bundleQty ?? null,
+          bundlePriceCents: bundlePriceCents ?? null,
           createdAtMs: nowMs,
           updatedAtMs: nowMs,
         };
@@ -205,7 +225,19 @@ describe("shopping-list admin route integration", () => {
     );
 
     mockUpdateShoppingListItem.mockImplementation(
-      ({ itemId, quantity, unitPriceCents }: { itemId: number; quantity: number; unitPriceCents: number }) => {
+      ({
+        itemId,
+        quantity,
+        unitPriceCents,
+        bundleQty,
+        bundlePriceCents,
+      }: {
+        itemId: number;
+        quantity: number;
+        unitPriceCents: number;
+        bundleQty?: number | null;
+        bundlePriceCents?: number | null;
+      }) => {
         const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
         if (!activeOwner) {
           return Promise.resolve({
@@ -230,10 +262,28 @@ describe("shopping-list admin route integration", () => {
           });
         }
 
+        const hasBundleQtyInput = bundleQty !== undefined;
+        const hasBundlePriceInput = bundlePriceCents !== undefined;
+        if (hasBundleQtyInput !== hasBundlePriceInput) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_INVALID_INPUT",
+              message:
+                "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.",
+            },
+          });
+        }
+        const hasBundleInput = hasBundleQtyInput && hasBundlePriceInput;
+
         const updated = {
           ...existing,
           quantity,
           unitPriceCents,
+          bundleQty: hasBundleInput ? (bundleQty ?? null) : existing.bundleQty,
+          bundlePriceCents: hasBundleInput
+            ? (bundlePriceCents ?? null)
+            : existing.bundlePriceCents,
           updatedAtMs: Date.now(),
         };
         ownerShoppingList[ownerId] = currentItems.map((item) =>
@@ -268,7 +318,7 @@ describe("shopping-list admin route integration", () => {
     });
   });
 
-  it("creates shopping-list items with explicit unit price and quantity", async () => {
+  it("creates shopping-list items with optional bundle fields", async () => {
     await renderShoppingListRoute();
 
     await waitFor(() => {
@@ -279,6 +329,11 @@ describe("shopping-list admin route integration", () => {
     fireEvent.press(screen.getByLabelText("Select Product Milk"));
     fireEvent.changeText(screen.getByLabelText("Unit Price (Centavos)"), "250");
     fireEvent.changeText(screen.getByLabelText("Available Quantity"), "3");
+    fireEvent.changeText(screen.getByLabelText("Bundle Quantity (Optional)"), "3");
+    fireEvent.changeText(
+      screen.getByLabelText("Bundle Price (Centavos, Optional)"),
+      "500",
+    );
     fireEvent.press(screen.getByLabelText("Submit Create Shopping List Item"));
 
     await waitFor(() => {
@@ -286,15 +341,17 @@ describe("shopping-list admin route integration", () => {
         productId: 1,
         unitPriceCents: 250,
         quantity: 3,
+        bundleQty: 3,
+        bundlePriceCents: 500,
       });
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Qty 3 · ₱2.50")).toBeTruthy();
+      expect(screen.getByText("Qty 3 · ₱2.50 · Bundle 3 for ₱5.00")).toBeTruthy();
     });
   });
 
-  it("updates selected shopping-list item pricing and quantity", async () => {
+  it("updates selected shopping-list item pricing, quantity, and bundle offer", async () => {
     await renderShoppingListRoute();
 
     await waitFor(() => {
@@ -304,6 +361,11 @@ describe("shopping-list admin route integration", () => {
     fireEvent.press(screen.getByLabelText("Edit Shopping List Item #10"));
     fireEvent.changeText(screen.getByLabelText("Edit Unit Price (Centavos)"), "180");
     fireEvent.changeText(screen.getByLabelText("Edit Available Quantity"), "4");
+    fireEvent.changeText(screen.getByLabelText("Edit Bundle Quantity (Optional)"), "2");
+    fireEvent.changeText(
+      screen.getByLabelText("Edit Bundle Price (Centavos, Optional)"),
+      "150",
+    );
     fireEvent.press(screen.getByLabelText("Submit Shopping List Item Update"));
 
     await waitFor(() => {
@@ -311,11 +373,74 @@ describe("shopping-list admin route integration", () => {
         itemId: 10,
         unitPriceCents: 180,
         quantity: 4,
+        bundleQty: 2,
+        bundlePriceCents: 150,
       });
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Qty 4 · ₱1.80")).toBeTruthy();
+      expect(screen.getByText("Qty 4 · ₱1.80 · Bundle 2 for ₱1.50")).toBeTruthy();
+    });
+  });
+
+  it("mock update semantics preserve existing bundle values when bundle fields are omitted", async () => {
+    ownerShoppingList[101][0] = {
+      ...ownerShoppingList[101][0],
+      bundleQty: 3,
+      bundlePriceCents: 500,
+    };
+
+    const result = await mockUpdateShoppingListItem({
+      itemId: 10,
+      quantity: 6,
+      unitPriceCents: 150,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: expect.objectContaining({
+        id: 10,
+        quantity: 6,
+        unitPriceCents: 150,
+        bundleQty: 3,
+        bundlePriceCents: 500,
+      }),
+    });
+  });
+
+  it("clears an existing bundle offer when edit bundle inputs are empty", async () => {
+    ownerShoppingList[101][0] = {
+      ...ownerShoppingList[101][0],
+      bundleQty: 3,
+      bundlePriceCents: 500,
+    };
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Qty 2 · ₱1.00 · Bundle 3 for ₱5.00")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Shopping List Item #10"));
+    fireEvent.changeText(screen.getByLabelText("Edit Bundle Quantity (Optional)"), "");
+    fireEvent.changeText(
+      screen.getByLabelText("Edit Bundle Price (Centavos, Optional)"),
+      "",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Shopping List Item Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateShoppingListItem).toHaveBeenCalledWith({
+        itemId: 10,
+        unitPriceCents: 100,
+        quantity: 2,
+        bundleQty: null,
+        bundlePriceCents: null,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Qty 2 · ₱1.00")).toBeTruthy();
+      expect(screen.queryByText("Qty 2 · ₱1.00 · Bundle 3 for ₱5.00")).toBeFalsy();
     });
   });
 
@@ -362,7 +487,151 @@ describe("shopping-list admin route integration", () => {
     expect(mockAddShoppingListItem).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        "Select a product, set a non-negative unit price, and set quantity above zero.",
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("blocks create submits when only one bundle field is provided", async () => {
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Select Product Milk"));
+    fireEvent.changeText(screen.getByLabelText("Unit Price (Centavos)"), "200");
+    fireEvent.changeText(screen.getByLabelText("Available Quantity"), "3");
+    fireEvent.changeText(screen.getByLabelText("Bundle Quantity (Optional)"), "3");
+    fireEvent.changeText(
+      screen.getByLabelText("Bundle Price (Centavos, Optional)"),
+      "",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Create Shopping List Item"));
+
+    expect(mockAddShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("blocks edit submits when only one bundle field is provided", async () => {
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Qty 2 · ₱1.00")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Shopping List Item #10"));
+    fireEvent.changeText(screen.getByLabelText("Edit Bundle Quantity (Optional)"), "3");
+    fireEvent.changeText(
+      screen.getByLabelText("Edit Bundle Price (Centavos, Optional)"),
+      "",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Shopping List Item Update"));
+
+    expect(mockUpdateShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("blocks create submits when bundle quantity is below minimum", async () => {
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Select Product Milk"));
+    fireEvent.changeText(screen.getByLabelText("Unit Price (Centavos)"), "200");
+    fireEvent.changeText(screen.getByLabelText("Available Quantity"), "3");
+    fireEvent.changeText(screen.getByLabelText("Bundle Quantity (Optional)"), "1");
+    fireEvent.changeText(
+      screen.getByLabelText("Bundle Price (Centavos, Optional)"),
+      "300",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Create Shopping List Item"));
+
+    expect(mockAddShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("blocks edit submits when bundle price is not positive", async () => {
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Qty 2 · ₱1.00")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Shopping List Item #10"));
+    fireEvent.changeText(screen.getByLabelText("Edit Bundle Quantity (Optional)"), "3");
+    fireEvent.changeText(
+      screen.getByLabelText("Edit Bundle Price (Centavos, Optional)"),
+      "0",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Shopping List Item Update"));
+
+    expect(mockUpdateShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("blocks create submits when bundle price is not positive", async () => {
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Select Product Milk"));
+    fireEvent.changeText(screen.getByLabelText("Unit Price (Centavos)"), "200");
+    fireEvent.changeText(screen.getByLabelText("Available Quantity"), "3");
+    fireEvent.changeText(screen.getByLabelText("Bundle Quantity (Optional)"), "3");
+    fireEvent.changeText(
+      screen.getByLabelText("Bundle Price (Centavos, Optional)"),
+      "0",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Create Shopping List Item"));
+
+    expect(mockAddShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("blocks edit submits when bundle quantity is below minimum", async () => {
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Qty 2 · ₱1.00")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Shopping List Item #10"));
+    fireEvent.changeText(screen.getByLabelText("Edit Bundle Quantity (Optional)"), "1");
+    fireEvent.changeText(
+      screen.getByLabelText("Edit Bundle Price (Centavos, Optional)"),
+      "300",
+    );
+    fireEvent.press(screen.getByLabelText("Submit Shopping List Item Update"));
+
+    expect(mockUpdateShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.",
       ),
     ).toBeTruthy();
   });
@@ -431,6 +700,8 @@ describe("shopping-list admin route integration", () => {
           productId: 1,
           quantity: 2,
           unitPriceCents: 100,
+          bundleQty: null,
+          bundlePriceCents: null,
           createdAtMs: 1,
           updatedAtMs: 1,
         },

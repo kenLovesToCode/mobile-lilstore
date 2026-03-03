@@ -26,6 +26,8 @@ type ShoppingListRow = {
   productId: number;
   quantity: number;
   unitPriceCents: number;
+  bundleQty: number | null;
+  bundlePriceCents: number | null;
 };
 
 type ShoppingListSectionRow =
@@ -46,7 +48,7 @@ type ShoppingListSection = {
 };
 
 const SHOPPING_LIST_FORM_INVALID_MESSAGE =
-  "Select a product, set a non-negative unit price, and set quantity above zero.";
+  "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.";
 const REMOVE_CONFIRM_MESSAGE =
   "Press Remove Shopping List Item again to confirm.";
 
@@ -64,6 +66,45 @@ function formatCurrencyFromCents(value: number) {
   return `₱${(value / 100).toFixed(2)}`;
 }
 
+function parseBundleInputs(
+  quantityInput: string,
+  priceInput: string,
+): { bundleQty: number | null; bundlePriceCents: number | null } | null {
+  const normalizedQuantity = quantityInput.trim();
+  const normalizedPrice = priceInput.trim();
+
+  if (normalizedQuantity.length === 0 && normalizedPrice.length === 0) {
+    return { bundleQty: null, bundlePriceCents: null };
+  }
+  if (normalizedQuantity.length === 0 || normalizedPrice.length === 0) {
+    return null;
+  }
+
+  const bundleQty = parseIntegerInput(normalizedQuantity);
+  const bundlePriceCents = parseIntegerInput(normalizedPrice);
+  if (
+    bundleQty == null ||
+    bundleQty < 2 ||
+    bundlePriceCents == null ||
+    bundlePriceCents <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    bundleQty,
+    bundlePriceCents,
+  };
+}
+
+function formatShoppingListMeta(item: ShoppingListRow) {
+  const pricing = `Qty ${item.quantity} · ${formatCurrencyFromCents(item.unitPriceCents)}`;
+  if (item.bundleQty == null || item.bundlePriceCents == null) {
+    return pricing;
+  }
+  return `${pricing} · Bundle ${item.bundleQty} for ${formatCurrencyFromCents(item.bundlePriceCents)}`;
+}
+
 export default function ShoppingListScreen() {
   const activeOwner = useSyncExternalStore(
     subscribeToAdminSession,
@@ -77,8 +118,12 @@ export default function ShoppingListScreen() {
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [createUnitPrice, setCreateUnitPrice] = useState("");
   const [createQuantity, setCreateQuantity] = useState("");
+  const [createBundleQty, setCreateBundleQty] = useState("");
+  const [createBundlePrice, setCreateBundlePrice] = useState("");
   const [editUnitPrice, setEditUnitPrice] = useState("");
   const [editQuantity, setEditQuantity] = useState("");
+  const [editBundleQty, setEditBundleQty] = useState("");
+  const [editBundlePrice, setEditBundlePrice] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -163,6 +208,8 @@ export default function ShoppingListScreen() {
         productId: item.productId,
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
+        bundleQty: item.bundleQty,
+        bundlePriceCents: item.bundlePriceCents,
       }));
 
       setProducts(nextProducts);
@@ -186,6 +233,8 @@ export default function ShoppingListScreen() {
         setRemoveConfirmItemId(null);
         setEditUnitPrice("");
         setEditQuantity("");
+        setEditBundleQty("");
+        setEditBundlePrice("");
       }
     } catch {
       if (
@@ -213,8 +262,12 @@ export default function ShoppingListScreen() {
       setSelectedItemId(null);
       setCreateUnitPrice("");
       setCreateQuantity("");
+      setCreateBundleQty("");
+      setCreateBundlePrice("");
       setEditUnitPrice("");
       setEditQuantity("");
+      setEditBundleQty("");
+      setEditBundlePrice("");
       setErrorMessage(null);
       setIsRefreshing(false);
       setIsCreating(false);
@@ -232,8 +285,12 @@ export default function ShoppingListScreen() {
       setSelectedItemId(null);
       setCreateUnitPrice("");
       setCreateQuantity("");
+      setCreateBundleQty("");
+      setCreateBundlePrice("");
       setEditUnitPrice("");
       setEditQuantity("");
+      setEditBundleQty("");
+      setEditBundlePrice("");
       setRemoveConfirmItemId(null);
       setErrorMessage(null);
       lastOwnerIdRef.current = activeOwnerId;
@@ -252,6 +309,10 @@ export default function ShoppingListScreen() {
     setSelectedProductId(item.productId);
     setEditUnitPrice(String(item.unitPriceCents));
     setEditQuantity(String(item.quantity));
+    setEditBundleQty(item.bundleQty == null ? "" : String(item.bundleQty));
+    setEditBundlePrice(
+      item.bundlePriceCents == null ? "" : String(item.bundlePriceCents),
+    );
     setRemoveConfirmItemId(null);
     setErrorMessage(null);
   }
@@ -270,11 +331,13 @@ export default function ShoppingListScreen() {
 
     const unitPriceCents = parseIntegerInput(createUnitPrice);
     const quantity = parseIntegerInput(createQuantity);
+    const bundleInputs = parseBundleInputs(createBundleQty, createBundlePrice);
     if (
       unitPriceCents == null ||
       unitPriceCents < 0 ||
       quantity == null ||
-      quantity <= 0
+      quantity <= 0 ||
+      !bundleInputs
     ) {
       setErrorMessage(SHOPPING_LIST_FORM_INVALID_MESSAGE);
       return;
@@ -288,6 +351,8 @@ export default function ShoppingListScreen() {
         productId: selectedProductId,
         unitPriceCents,
         quantity,
+        bundleQty: bundleInputs.bundleQty,
+        bundlePriceCents: bundleInputs.bundlePriceCents,
       });
       if (ownerContextVersion !== ownerContextVersionRef.current) {
         return;
@@ -300,9 +365,19 @@ export default function ShoppingListScreen() {
 
       setCreateUnitPrice("");
       setCreateQuantity("");
+      setCreateBundleQty("");
+      setCreateBundlePrice("");
       setSelectedItemId(result.value.id);
       setEditUnitPrice(String(result.value.unitPriceCents));
       setEditQuantity(String(result.value.quantity));
+      setEditBundleQty(
+        result.value.bundleQty == null ? "" : String(result.value.bundleQty),
+      );
+      setEditBundlePrice(
+        result.value.bundlePriceCents == null
+          ? ""
+          : String(result.value.bundlePriceCents),
+      );
       await refreshData();
     } catch {
       if (ownerContextVersion !== ownerContextVersionRef.current) {
@@ -331,11 +406,13 @@ export default function ShoppingListScreen() {
 
     const unitPriceCents = parseIntegerInput(editUnitPrice);
     const quantity = parseIntegerInput(editQuantity);
+    const bundleInputs = parseBundleInputs(editBundleQty, editBundlePrice);
     if (
       unitPriceCents == null ||
       unitPriceCents < 0 ||
       quantity == null ||
-      quantity <= 0
+      quantity <= 0 ||
+      !bundleInputs
     ) {
       setErrorMessage(SHOPPING_LIST_FORM_INVALID_MESSAGE);
       return;
@@ -349,6 +426,8 @@ export default function ShoppingListScreen() {
         itemId: selectedItem.id,
         unitPriceCents,
         quantity,
+        bundleQty: bundleInputs.bundleQty,
+        bundlePriceCents: bundleInputs.bundlePriceCents,
       });
       if (ownerContextVersion !== ownerContextVersionRef.current) {
         return;
@@ -361,6 +440,14 @@ export default function ShoppingListScreen() {
 
       setEditUnitPrice(String(result.value.unitPriceCents));
       setEditQuantity(String(result.value.quantity));
+      setEditBundleQty(
+        result.value.bundleQty == null ? "" : String(result.value.bundleQty),
+      );
+      setEditBundlePrice(
+        result.value.bundlePriceCents == null
+          ? ""
+          : String(result.value.bundlePriceCents),
+      );
       setRemoveConfirmItemId(null);
       await refreshData();
     } catch {
@@ -415,6 +502,8 @@ export default function ShoppingListScreen() {
       setSelectedItemId(null);
       setEditUnitPrice("");
       setEditQuantity("");
+      setEditBundleQty("");
+      setEditBundlePrice("");
       await refreshData();
     } catch {
       if (ownerContextVersion !== ownerContextVersionRef.current) {
@@ -530,10 +619,7 @@ export default function ShoppingListScreen() {
                 ]}
               >
                 <Text style={styles.listItemName}>{productName}</Text>
-                <Text style={styles.listItemMeta}>
-                  Qty {item.item.quantity} ·{" "}
-                  {formatCurrencyFromCents(item.item.unitPriceCents)}
-                </Text>
+                <Text style={styles.listItemMeta}>{formatShoppingListMeta(item.item)}</Text>
               </Pressable>
             );
           }}
@@ -586,6 +672,22 @@ export default function ShoppingListScreen() {
                 value={createQuantity}
                 onChangeText={setCreateQuantity}
               />
+              <TextInput
+                accessibilityLabel="Bundle Quantity (Optional)"
+                style={styles.input}
+                placeholder="Bundle quantity (optional)"
+                keyboardType="number-pad"
+                value={createBundleQty}
+                onChangeText={setCreateBundleQty}
+              />
+              <TextInput
+                accessibilityLabel="Bundle Price (Centavos, Optional)"
+                style={styles.input}
+                placeholder="Bundle price in centavos (optional)"
+                keyboardType="number-pad"
+                value={createBundlePrice}
+                onChangeText={setCreateBundlePrice}
+              />
               <Pressable
                 accessibilityLabel="Submit Create Shopping List Item"
                 accessibilityRole="button"
@@ -625,6 +727,24 @@ export default function ShoppingListScreen() {
                 editable={Boolean(selectedItem)}
                 value={editQuantity}
                 onChangeText={setEditQuantity}
+              />
+              <TextInput
+                accessibilityLabel="Edit Bundle Quantity (Optional)"
+                style={styles.input}
+                placeholder="Edit bundle quantity (optional)"
+                keyboardType="number-pad"
+                editable={Boolean(selectedItem)}
+                value={editBundleQty}
+                onChangeText={setEditBundleQty}
+              />
+              <TextInput
+                accessibilityLabel="Edit Bundle Price (Centavos, Optional)"
+                style={styles.input}
+                placeholder="Edit bundle price in centavos (optional)"
+                keyboardType="number-pad"
+                editable={Boolean(selectedItem)}
+                value={editBundlePrice}
+                onChangeText={setEditBundlePrice}
               />
               <Pressable
                 accessibilityLabel="Submit Shopping List Item Update"
