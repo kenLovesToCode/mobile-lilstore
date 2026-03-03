@@ -19,6 +19,7 @@ import {
   createProduct,
   deleteProduct,
   listProducts,
+  restoreProduct,
   updateProduct,
 } from "@/domain/services/owner-data-service";
 
@@ -42,6 +43,7 @@ export default function ProductsScreen() {
   );
   const activeOwnerId = activeOwner?.id ?? null;
   const [products, setProducts] = useState<ProductListItem[]>([]);
+  const [productViewMode, setProductViewMode] = useState<"active" | "archived">("active");
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [createName, setCreateName] = useState("");
   const [createBarcode, setCreateBarcode] = useState("");
@@ -52,15 +54,17 @@ export default function ProductsScreen() {
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteConfirmProductId, setDeleteConfirmProductId] = useState<number | null>(null);
   const submitLockRef = useRef<
-    "create" | "update" | "archive" | "delete" | null
+    "create" | "update" | "archive" | "restore" | "delete" | null
   >(null);
   const ownerContextVersionRef = useRef(0);
   const latestRefreshRequestRef = useRef(0);
   const selectedProductIdRef = useRef<number | null>(null);
   const lastOwnerIdRef = useRef<number | null>(null);
+  const isArchivedView = productViewMode === "archived";
 
   useEffect(() => {
     ownerContextVersionRef.current += 1;
@@ -86,7 +90,9 @@ export default function ProductsScreen() {
 
     setIsRefreshing(true);
     try {
-      const result = await listProducts();
+      const result = await listProducts(
+        isArchivedView ? { archivedOnly: true } : undefined,
+      );
       if (
         ownerContextVersion !== ownerContextVersionRef.current ||
         refreshRequestId !== latestRefreshRequestRef.current
@@ -133,11 +139,12 @@ export default function ProductsScreen() {
         setIsRefreshing(false);
       }
     }
-  }, [activeOwnerId]);
+  }, [activeOwnerId, isArchivedView]);
 
   useEffect(() => {
     if (activeOwnerId == null) {
       setProducts([]);
+      setProductViewMode("active");
       setSelectedProductId(null);
       setErrorMessage(null);
       setCreateName("");
@@ -147,6 +154,7 @@ export default function ProductsScreen() {
       setDeleteConfirmProductId(null);
       setIsRefreshing(false);
       setIsArchiving(false);
+      setIsRestoring(false);
       setIsDeleting(false);
       lastOwnerIdRef.current = null;
       return;
@@ -161,6 +169,7 @@ export default function ProductsScreen() {
       setEditName("");
       setEditBarcode("");
       setDeleteConfirmProductId(null);
+      setIsRestoring(false);
       lastOwnerIdRef.current = activeOwnerId;
     }
 
@@ -175,12 +184,25 @@ export default function ProductsScreen() {
     setErrorMessage(null);
   }
 
+  function onToggleProductViewMode() {
+    setProductViewMode((currentMode) =>
+      currentMode === "active" ? "archived" : "active",
+    );
+    setSelectedProductId(null);
+    setDeleteConfirmProductId(null);
+    setEditName("");
+    setEditBarcode("");
+    setErrorMessage(null);
+  }
+
   async function onCreateProduct() {
     if (
       !activeOwner ||
+      isArchivedView ||
       isCreating ||
       isUpdating ||
       isArchiving ||
+      isRestoring ||
       isDeleting ||
       submitLockRef.current !== null
     ) {
@@ -234,9 +256,11 @@ export default function ProductsScreen() {
     if (
       !activeOwner ||
       !selectedProduct ||
+      isArchivedView ||
       isUpdating ||
       isCreating ||
       isArchiving ||
+      isRestoring ||
       isDeleting ||
       submitLockRef.current !== null
     ) {
@@ -288,7 +312,9 @@ export default function ProductsScreen() {
     if (
       !activeOwner ||
       !selectedProduct ||
+      isArchivedView ||
       isArchiving ||
+      isRestoring ||
       isDeleting ||
       isCreating ||
       isUpdating ||
@@ -331,12 +357,63 @@ export default function ProductsScreen() {
     }
   }
 
+  async function onRestoreProduct() {
+    if (
+      !activeOwner ||
+      !selectedProduct ||
+      !isArchivedView ||
+      isRestoring ||
+      isArchiving ||
+      isDeleting ||
+      isCreating ||
+      isUpdating ||
+      submitLockRef.current !== null
+    ) {
+      return;
+    }
+
+    submitLockRef.current = "restore";
+    const ownerContextVersion = ownerContextVersionRef.current;
+    setIsRestoring(true);
+    try {
+      const result = await restoreProduct({
+        productId: selectedProduct.id,
+      });
+      if (ownerContextVersion !== ownerContextVersionRef.current) {
+        return;
+      }
+
+      if (!result.ok) {
+        setErrorMessage(result.error.message);
+        return;
+      }
+
+      setDeleteConfirmProductId(null);
+      setSelectedProductId(null);
+      setEditName("");
+      setEditBarcode("");
+      await refreshProducts();
+    } catch {
+      if (ownerContextVersion !== ownerContextVersionRef.current) {
+        return;
+      }
+      setErrorMessage("Unable to restore product right now. Please try again.");
+    } finally {
+      if (submitLockRef.current === "restore") {
+        submitLockRef.current = null;
+      }
+      setIsRestoring(false);
+    }
+  }
+
   async function onDeleteProduct() {
     if (
       !activeOwner ||
       !selectedProduct ||
+      isArchivedView ||
       isDeleting ||
       isArchiving ||
+      isRestoring ||
       isCreating ||
       isUpdating ||
       submitLockRef.current !== null
@@ -387,32 +464,55 @@ export default function ProductsScreen() {
   }
 
   const createButtonDisabled =
-    !activeOwner || isCreating || isUpdating || isArchiving || isDeleting;
-  const updateButtonDisabled =
     !activeOwner ||
-    !selectedProduct ||
+    isArchivedView ||
     isCreating ||
     isUpdating ||
     isArchiving ||
+    isRestoring ||
+    isDeleting;
+  const updateButtonDisabled =
+    !activeOwner ||
+    !selectedProduct ||
+    isArchivedView ||
+    isCreating ||
+    isUpdating ||
+    isArchiving ||
+    isRestoring ||
     isDeleting;
   const archiveButtonDisabled =
     !activeOwner ||
     !selectedProduct ||
+    isArchivedView ||
     isCreating ||
     isUpdating ||
     isArchiving ||
+    isRestoring ||
+    isDeleting;
+  const restoreButtonDisabled =
+    !activeOwner ||
+    !selectedProduct ||
+    !isArchivedView ||
+    isCreating ||
+    isUpdating ||
+    isArchiving ||
+    isRestoring ||
     isDeleting;
   const deleteButtonDisabled =
     !activeOwner ||
     !selectedProduct ||
+    isArchivedView ||
     isCreating ||
     isUpdating ||
     isArchiving ||
+    isRestoring ||
     isDeleting;
 
   const productsEmptyMessage = !activeOwner
     ? "Product list is unavailable until an owner is selected."
-    : "No products yet for this owner.";
+    : isArchivedView
+      ? "No archived products for this owner."
+      : "No products yet for this owner.";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -437,7 +537,24 @@ export default function ProductsScreen() {
 
                 {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
-                <Text style={styles.sectionTitle}>Products</Text>
+                <Text style={styles.sectionTitle}>
+                  {isArchivedView ? "Archived Products" : "Active Products"}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isArchivedView ? "Show Active Products" : "Show Archived Products"
+                  }
+                  onPress={onToggleProductViewMode}
+                  style={({ pressed }) => [
+                    styles.inlineToggleButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                >
+                  <Text style={styles.inlineToggleButtonLabel}>
+                    {isArchivedView ? "Show Active Products" : "Show Archived Products"}
+                  </Text>
+                </Pressable>
                 {isRefreshing ? <Text style={styles.helperText}>Loading products...</Text> : null}
               </View>
             }
@@ -465,111 +582,139 @@ export default function ProductsScreen() {
             ItemSeparatorComponent={() => <View style={styles.listItemSpacer} />}
             ListFooterComponent={
               <View style={styles.footerContainer}>
-                <Text style={styles.sectionTitle}>Create New Product</Text>
-                <TextInput
-                  accessibilityLabel="Product Name"
-                  style={styles.input}
-                  placeholder="Product name"
-                  value={createName}
-                  onChangeText={setCreateName}
-                />
-                <TextInput
-                  accessibilityLabel="Product Barcode"
-                  style={styles.input}
-                  placeholder="Barcode"
-                  value={createBarcode}
-                  onChangeText={setCreateBarcode}
-                />
-                <Pressable
-                  accessibilityLabel="Submit Create Product"
-                  accessibilityRole="button"
-                  disabled={createButtonDisabled}
-                  onPress={() => void onCreateProduct()}
-                  style={({ pressed }) => [
-                    styles.primaryButton,
-                    pressed && !createButtonDisabled && styles.buttonPressed,
-                    createButtonDisabled && styles.buttonDisabled,
-                  ]}
-                >
-                  <Text style={styles.primaryButtonLabel}>
-                    {isCreating ? "Creating..." : "Create Product"}
-                  </Text>
-                </Pressable>
+                {isArchivedView ? (
+                  <>
+                    <Text style={styles.sectionTitle}>Restore Archived Product</Text>
+                    {!selectedProduct ? (
+                      <Text style={styles.helperText}>
+                        Select an archived product above to restore.
+                      </Text>
+                    ) : null}
+                    <Pressable
+                      accessibilityLabel="Restore Selected Product"
+                      accessibilityRole="button"
+                      disabled={restoreButtonDisabled}
+                      onPress={() => void onRestoreProduct()}
+                      style={({ pressed }) => [
+                        styles.secondaryActionButton,
+                        pressed && !restoreButtonDisabled && styles.buttonPressed,
+                        restoreButtonDisabled && styles.buttonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.secondaryActionButtonLabel}>
+                        {isRestoring ? "Restoring..." : "Restore Product"}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.sectionTitle}>Create New Product</Text>
+                    <TextInput
+                      accessibilityLabel="Product Name"
+                      style={styles.input}
+                      placeholder="Product name"
+                      value={createName}
+                      onChangeText={setCreateName}
+                    />
+                    <TextInput
+                      accessibilityLabel="Product Barcode"
+                      style={styles.input}
+                      placeholder="Barcode"
+                      value={createBarcode}
+                      onChangeText={setCreateBarcode}
+                    />
+                    <Pressable
+                      accessibilityLabel="Submit Create Product"
+                      accessibilityRole="button"
+                      disabled={createButtonDisabled}
+                      onPress={() => void onCreateProduct()}
+                      style={({ pressed }) => [
+                        styles.primaryButton,
+                        pressed && !createButtonDisabled && styles.buttonPressed,
+                        createButtonDisabled && styles.buttonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.primaryButtonLabel}>
+                        {isCreating ? "Creating..." : "Create Product"}
+                      </Text>
+                    </Pressable>
 
-                <Text style={styles.sectionTitle}>Edit Product</Text>
-                {!selectedProduct ? (
-                  <Text style={styles.helperText}>Select a product above to edit.</Text>
-                ) : null}
-                <TextInput
-                  accessibilityLabel="Edit Product Name"
-                  style={styles.input}
-                  placeholder="Updated product name"
-                  editable={Boolean(selectedProduct)}
-                  value={editName}
-                  onChangeText={setEditName}
-                />
-                <TextInput
-                  accessibilityLabel="Edit Product Barcode"
-                  style={styles.input}
-                  placeholder="Updated barcode"
-                  editable={Boolean(selectedProduct)}
-                  value={editBarcode}
-                  onChangeText={setEditBarcode}
-                />
-                <Pressable
-                  accessibilityLabel="Submit Product Update"
-                  accessibilityRole="button"
-                  disabled={updateButtonDisabled}
-                  onPress={() => void onUpdateProduct()}
-                  style={({ pressed }) => [
-                    styles.primaryButton,
-                    pressed && !updateButtonDisabled && styles.buttonPressed,
-                    updateButtonDisabled && styles.buttonDisabled,
-                  ]}
-                >
-                  <Text style={styles.primaryButtonLabel}>
-                    {isUpdating ? "Saving..." : "Save Product Changes"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="Archive Selected Product"
-                  accessibilityRole="button"
-                  disabled={archiveButtonDisabled}
-                  onPress={() => void onArchiveProduct()}
-                  style={({ pressed }) => [
-                    styles.secondaryActionButton,
-                    pressed && !archiveButtonDisabled && styles.buttonPressed,
-                    archiveButtonDisabled && styles.buttonDisabled,
-                  ]}
-                >
-                  <Text style={styles.secondaryActionButtonLabel}>
-                    {isArchiving ? "Archiving..." : "Archive Product"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="Delete Selected Product"
-                  accessibilityRole="button"
-                  disabled={deleteButtonDisabled}
-                  onPress={() => void onDeleteProduct()}
-                  style={({ pressed }) => [
-                    styles.dangerButton,
-                    pressed && !deleteButtonDisabled && styles.buttonPressed,
-                    deleteButtonDisabled && styles.buttonDisabled,
-                  ]}
-                >
-                  <Text style={styles.dangerButtonLabel}>
-                    {isDeleting
-                      ? "Deleting..."
-                      : deleteConfirmProductId === selectedProduct?.id
-                        ? "Confirm Delete Product"
-                        : "Delete Product"}
-                  </Text>
-                </Pressable>
-                {deleteConfirmProductId === selectedProduct?.id ? (
-                  <Text style={styles.warningText}>
-                    Press Delete Product again to confirm permanent removal.
-                  </Text>
-                ) : null}
+                    <Text style={styles.sectionTitle}>Edit Product</Text>
+                    {!selectedProduct ? (
+                      <Text style={styles.helperText}>Select a product above to edit.</Text>
+                    ) : null}
+                    <TextInput
+                      accessibilityLabel="Edit Product Name"
+                      style={styles.input}
+                      placeholder="Updated product name"
+                      editable={Boolean(selectedProduct)}
+                      value={editName}
+                      onChangeText={setEditName}
+                    />
+                    <TextInput
+                      accessibilityLabel="Edit Product Barcode"
+                      style={styles.input}
+                      placeholder="Updated barcode"
+                      editable={Boolean(selectedProduct)}
+                      value={editBarcode}
+                      onChangeText={setEditBarcode}
+                    />
+                    <Pressable
+                      accessibilityLabel="Submit Product Update"
+                      accessibilityRole="button"
+                      disabled={updateButtonDisabled}
+                      onPress={() => void onUpdateProduct()}
+                      style={({ pressed }) => [
+                        styles.primaryButton,
+                        pressed && !updateButtonDisabled && styles.buttonPressed,
+                        updateButtonDisabled && styles.buttonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.primaryButtonLabel}>
+                        {isUpdating ? "Saving..." : "Save Product Changes"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Archive Selected Product"
+                      accessibilityRole="button"
+                      disabled={archiveButtonDisabled}
+                      onPress={() => void onArchiveProduct()}
+                      style={({ pressed }) => [
+                        styles.secondaryActionButton,
+                        pressed && !archiveButtonDisabled && styles.buttonPressed,
+                        archiveButtonDisabled && styles.buttonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.secondaryActionButtonLabel}>
+                        {isArchiving ? "Archiving..." : "Archive Product"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Delete Selected Product"
+                      accessibilityRole="button"
+                      disabled={deleteButtonDisabled}
+                      onPress={() => void onDeleteProduct()}
+                      style={({ pressed }) => [
+                        styles.dangerButton,
+                        pressed && !deleteButtonDisabled && styles.buttonPressed,
+                        deleteButtonDisabled && styles.buttonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.dangerButtonLabel}>
+                        {isDeleting
+                          ? "Deleting..."
+                          : deleteConfirmProductId === selectedProduct?.id
+                            ? "Confirm Delete Product"
+                            : "Delete Product"}
+                      </Text>
+                    </Pressable>
+                    {deleteConfirmProductId === selectedProduct?.id ? (
+                      <Text style={styles.warningText}>
+                        Press Delete Product again to confirm permanent removal.
+                      </Text>
+                    ) : null}
+                  </>
+                )}
 
                 <Pressable
                   accessibilityRole="button"
@@ -621,6 +766,20 @@ const styles = StyleSheet.create({
   },
   footerContainer: {
     gap: 10,
+  },
+  inlineToggleButton: {
+    minHeight: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  inlineToggleButtonLabel: {
+    color: "#374151",
+    fontWeight: "700",
+    fontSize: 13,
   },
   title: {
     fontSize: 22,

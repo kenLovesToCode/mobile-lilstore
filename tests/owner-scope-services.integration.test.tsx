@@ -240,11 +240,215 @@ describe("owner-scoped services", () => {
     );
   });
 
-  it("filters archived products from default list reads and allows explicit includeArchived reads", async () => {
+  it("restores archived products in active owner scope with deterministic conflict mapping", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: 500,
+        created_at_ms: 100,
+        updated_at_ms: 500,
+      })
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: null,
+        created_at_ms: 100,
+        updated_at_ms: 700,
+      });
+
+    const result = await productService.restoreProduct({
+      productId: 44,
+      nowMs: 700,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 44,
+        ownerId: 11,
+        name: "Milk",
+        barcode: "A-1",
+        createdAtMs: 100,
+        updatedAtMs: 700,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("SET archived_at_ms = NULL"),
+      700,
+      44,
+      11,
+    );
+  });
+
+  it("maps owner-scoped duplicate barcode conflicts during restore deterministically", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 44,
+      owner_id: 11,
+      name: "Milk",
+      barcode: "A-1",
+      archived_at_ms: 500,
+      created_at_ms: 100,
+      updated_at_ms: 500,
+    });
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error("UNIQUE constraint failed: index 'idx_product_owner_barcode_unique'"),
+    );
+
+    const result = await productService.restoreProduct({
+      productId: 44,
+      nowMs: 700,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A product with this barcode already exists for the active owner.",
+      },
+    });
+  });
+
+  it("rejects restore when product is already active", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 44,
+      owner_id: 11,
+      name: "Milk",
+      barcode: "A-1",
+      archived_at_ms: null,
+      created_at_ms: 100,
+      updated_at_ms: 500,
+    });
+
+    const result = await productService.restoreProduct({
+      productId: 44,
+      nowMs: 700,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "Only archived products can be restored.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("allows shopping-list create and edit paths after restoring an archived product", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 444,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: 500,
+        created_at_ms: 100,
+        updated_at_ms: 500,
+      })
+      .mockResolvedValueOnce({
+        id: 444,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: null,
+        created_at_ms: 100,
+        updated_at_ms: 700,
+      })
+      .mockResolvedValueOnce({
+        owner_id: 11,
+        archived_at_ms: null,
+      })
+      .mockResolvedValueOnce({
+        id: 81,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 1,
+        unit_price_cents: 100,
+        created_at_ms: 701,
+        updated_at_ms: 701,
+      })
+      .mockResolvedValueOnce({
+        id: 81,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 1,
+        unit_price_cents: 100,
+        created_at_ms: 701,
+        updated_at_ms: 701,
+      })
+      .mockResolvedValueOnce({
+        owner_id: 11,
+        archived_at_ms: null,
+      })
+      .mockResolvedValueOnce({
+        id: 81,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 2,
+        unit_price_cents: 100,
+        created_at_ms: 701,
+        updated_at_ms: 702,
+      });
+    mockDb.runAsync
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 444 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 81 })
+      .mockResolvedValueOnce({ changes: 1, lastInsertRowId: 0 });
+
+    const restoreResult = await productService.restoreProduct({
+      productId: 444,
+      nowMs: 700,
+    });
+    const createListItemResult = await shoppingListService.addShoppingListItem({
+      productId: 444,
+      quantity: 1,
+      unitPriceCents: 100,
+      nowMs: 701,
+    });
+    const updateListItemResult = await shoppingListService.updateShoppingListItem({
+      itemId: 81,
+      quantity: 2,
+      unitPriceCents: 100,
+      nowMs: 702,
+    });
+
+    expect(restoreResult.ok).toBe(true);
+    expect(createListItemResult).toEqual({
+      ok: true,
+      value: {
+        id: 81,
+        ownerId: 11,
+        productId: 444,
+        quantity: 1,
+        unitPriceCents: 100,
+        createdAtMs: 701,
+        updatedAtMs: 701,
+      },
+    });
+    expect(updateListItemResult).toEqual({
+      ok: true,
+      value: {
+        id: 81,
+        ownerId: 11,
+        productId: 444,
+        quantity: 2,
+        unitPriceCents: 100,
+        createdAtMs: 701,
+        updatedAtMs: 702,
+      },
+    });
+  });
+
+  it("filters archived products from default list reads and supports includeArchived and archivedOnly reads", async () => {
     mockDb.getAllAsync.mockResolvedValue([]);
 
     await productService.listProducts();
     await productService.listProducts({ includeArchived: true });
+    await productService.listProducts({ archivedOnly: true });
 
     expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
       1,
@@ -254,6 +458,11 @@ describe("owner-scoped services", () => {
     expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
       2,
       expect.not.stringContaining("archived_at_ms IS NULL"),
+      11,
+    );
+    expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining("archived_at_ms IS NOT NULL"),
       11,
     );
   });
@@ -328,6 +537,31 @@ describe("owner-scoped services", () => {
     });
 
     const result = await productService.archiveProduct({
+      productId: 33,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: "The requested record belongs to a different owner.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-owner product restore requests", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 33,
+      owner_id: 99,
+      name: "Owner B product",
+      barcode: "B-1",
+      archived_at_ms: 1,
+      created_at_ms: 1,
+      updated_at_ms: 1,
+    });
+
+    const result = await productService.restoreProduct({
       productId: 33,
     });
 

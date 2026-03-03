@@ -12,6 +12,7 @@ const mockListProducts = jest.fn();
 const mockCreateProduct = jest.fn();
 const mockUpdateProduct = jest.fn();
 const mockArchiveProduct = jest.fn();
+const mockRestoreProduct = jest.fn();
 const mockDeleteProduct = jest.fn();
 const mockCreateShopper = jest.fn();
 const mockUpdateShopper = jest.fn();
@@ -23,6 +24,7 @@ jest.mock("@/domain/services/owner-data-service", () => ({
   listProducts: (...args: unknown[]) => mockListProducts(...args),
   createProduct: (...args: unknown[]) => mockCreateProduct(...args),
   archiveProduct: (...args: unknown[]) => mockArchiveProduct(...args),
+  restoreProduct: (...args: unknown[]) => mockRestoreProduct(...args),
   deleteProduct: (...args: unknown[]) => mockDeleteProduct(...args),
   createShopper: (...args: unknown[]) => mockCreateShopper(...args),
   addShoppingListItem: jest.fn(),
@@ -58,6 +60,7 @@ type ProductFixture = {
   ownerId: number;
   name: string;
   barcode: string;
+  archivedAtMs?: number | null;
   createdAtMs: number;
   updatedAtMs: number;
 };
@@ -98,6 +101,7 @@ describe("owner-data owner-scope integration", () => {
     mockCreateProduct.mockReset();
     mockUpdateProduct.mockReset();
     mockArchiveProduct.mockReset();
+    mockRestoreProduct.mockReset();
     mockDeleteProduct.mockReset();
     mockCreateShopper.mockReset();
     mockUpdateShopper.mockReset();
@@ -112,8 +116,18 @@ describe("owner-data owner-scope integration", () => {
           ownerId: 101,
           name: "Product A",
           barcode: "A-1",
+          archivedAtMs: null,
           createdAtMs: 1,
           updatedAtMs: 1,
+        },
+        {
+          id: 3,
+          ownerId: 101,
+          name: "Archived Product A",
+          barcode: "A-ARCH",
+          archivedAtMs: 5,
+          createdAtMs: 3,
+          updatedAtMs: 5,
         },
       ],
       202: [
@@ -122,6 +136,7 @@ describe("owner-data owner-scope integration", () => {
           ownerId: 202,
           name: "Product B",
           barcode: "B-1",
+          archivedAtMs: null,
           createdAtMs: 2,
           updatedAtMs: 2,
         },
@@ -175,7 +190,8 @@ describe("owner-data owner-scope integration", () => {
       });
     });
 
-    mockListProducts.mockImplementation(() => {
+    mockListProducts.mockImplementation(
+      (options: { includeArchived?: boolean; archivedOnly?: boolean } = {}) => {
       const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
       if (!activeOwner) {
         return Promise.resolve({
@@ -187,11 +203,22 @@ describe("owner-data owner-scope integration", () => {
         });
       }
 
+      const ownerId = activeOwner.id;
+      const allProducts = ownerProducts[ownerId] ?? [];
+      const filteredProducts = options.archivedOnly
+        ? allProducts.filter((product) => product.archivedAtMs != null)
+        : options.includeArchived
+          ? allProducts
+          : allProducts.filter((product) => product.archivedAtMs == null);
+
       return Promise.resolve({
         ok: true,
-        value: (ownerProducts[activeOwner.id] ?? []).map((product) => ({ ...product })),
+        value: filteredProducts.map(
+          ({ archivedAtMs: _archivedAtMs, ...product }) => ({ ...product }),
+        ),
       });
-    });
+      },
+    );
 
     mockCreateProduct.mockImplementation(
       ({ name, barcode }: { name: string; barcode: string }) => {
@@ -215,6 +242,7 @@ describe("owner-data owner-scope integration", () => {
           ownerId,
           name,
           barcode,
+          archivedAtMs: null,
           createdAtMs: nowMs,
           updatedAtMs: nowMs,
         };
@@ -296,14 +324,68 @@ describe("owner-data owner-scope integration", () => {
         });
       }
 
-      ownerProducts[ownerId] = currentProducts.filter((product) => product.id !== productId);
+      ownerProducts[ownerId] = currentProducts.map((product) =>
+        product.id === productId
+          ? { ...product, archivedAtMs: Date.now(), updatedAtMs: Date.now() }
+          : product,
+      );
+      const updated = ownerProducts[ownerId].find((product) => product.id === productId)!;
       return Promise.resolve({
         ok: true,
-        value: {
-          ...existing,
-          archivedAtMs: Date.now(),
-          updatedAtMs: Date.now(),
-        },
+        value: { ...updated },
+      });
+    });
+
+    mockRestoreProduct.mockImplementation(({ productId }: { productId: number }) => {
+      const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+      if (!activeOwner) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+            message: "Select an active owner before managing owner-scoped data.",
+          },
+        });
+      }
+
+      const ownerId = activeOwner.id;
+      const currentProducts = ownerProducts[ownerId] ?? [];
+      const existing = currentProducts.find((product) => product.id === productId);
+      if (!existing) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_NOT_FOUND",
+            message: "Record not found in the active owner scope.",
+          },
+        });
+      }
+
+      const hasActiveBarcodeConflict = currentProducts.some(
+        (product) =>
+          product.id !== existing.id &&
+          product.archivedAtMs == null &&
+          product.barcode.toLowerCase() === existing.barcode.toLowerCase(),
+      );
+      if (hasActiveBarcodeConflict) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_CONFLICT",
+            message: "A product with this barcode already exists for the active owner.",
+          },
+        });
+      }
+
+      ownerProducts[ownerId] = currentProducts.map((product) =>
+        product.id === productId
+          ? { ...product, archivedAtMs: null, updatedAtMs: Date.now() }
+          : product,
+      );
+      const updated = ownerProducts[ownerId].find((product) => product.id === productId)!;
+      return Promise.resolve({
+        ok: true,
+        value: { ...updated, archivedAtMs: undefined },
       });
     });
 
@@ -550,6 +632,91 @@ describe("owner-data owner-scope integration", () => {
     await waitFor(() => {
       expect(mockListProducts).toHaveBeenCalledTimes(2);
       expect(screen.queryByText("Product A")).toBeFalsy();
+    });
+  });
+
+  it("toggles to archived view and limits list reads to archived products only", async () => {
+    await renderProductsRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Product A")).toBeTruthy();
+      expect(screen.queryByText("Archived Product A")).toBeFalsy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Show Archived Products"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Archived Product A")).toBeTruthy();
+      expect(screen.queryByText("Product A")).toBeFalsy();
+      expect(screen.getByText("Archived Products")).toBeTruthy();
+    });
+
+    expect(mockListProducts).toHaveBeenCalledWith({ archivedOnly: true });
+  });
+
+  it("restores archived products and returns them to the active list", async () => {
+    await renderProductsRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Show Archived Products"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Archived Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Product Archived Product A"));
+    fireEvent.press(screen.getByLabelText("Restore Selected Product"));
+
+    await waitFor(() => {
+      expect(mockRestoreProduct).toHaveBeenCalledWith({
+        productId: 3,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Archived Product A")).toBeFalsy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Show Active Products"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Archived Product A")).toBeTruthy();
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+  });
+
+  it("surfaces restore conflict messaging and keeps archived-view state stable", async () => {
+    mockRestoreProduct.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A product with this barcode already exists for the active owner.",
+      },
+    });
+
+    await renderProductsRoute();
+    await waitFor(() => {
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Show Archived Products"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Archived Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Product Archived Product A"));
+    fireEvent.press(screen.getByLabelText("Restore Selected Product"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("A product with this barcode already exists for the active owner."),
+      ).toBeTruthy();
+      expect(screen.getByText("Archived Product A")).toBeTruthy();
+      expect(screen.getByText("Archived Products")).toBeTruthy();
     });
   });
 

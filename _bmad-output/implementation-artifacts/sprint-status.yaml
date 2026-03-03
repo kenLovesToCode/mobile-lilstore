@@ -56,6 +56,7 @@ development_status:
   3-1-create-and-edit-products-name-barcode: done
   3-2-prevent-duplicate-barcodes-within-an-owner: done
   3-3-archive-or-delete-products: done
+  3-4-view-and-restore-archived-products: done
   epic-3-retrospective: optional
   epic-4: backlog
   4-1-create-shopping-list-items-unit-price-available-qty: backlog

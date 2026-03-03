@@ -14,6 +14,7 @@ import {
   deleteProduct,
   getProductById,
   listProducts,
+  restoreProduct,
   updateProduct,
   type Product,
 } from "@/domain/services/product-service";
@@ -94,6 +95,7 @@ export {
   listProducts,
   recordPayment,
   recordPurchase,
+  restoreProduct,
   updateProduct,
   updateShopper,
   updateShoppingListItem,

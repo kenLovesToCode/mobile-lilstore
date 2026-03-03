@@ -407,6 +407,29 @@ So that my catalog stays current without clutter.
 **Then** it is removed from the active product list (or clearly marked archived) (FR15)
 **And** it is no longer offered as an active product choice in admin product pickers
 
+### Story 3.4: View and Restore Archived Products
+
+As an admin,
+I want to view archived products and restore them,
+So that accidental archives can be recovered without recreating products from scratch.
+
+**Acceptance Criteria:**
+
+**Given** archived products exist for the active owner
+**When** I switch to an archived-products view in admin product management
+**Then** I can see archived products for that owner only
+**And** active products remain hidden in that archived view by default (FR10, FR15)
+
+**Given** an archived product is selected
+**When** I choose Restore
+**Then** the product is returned to the active product list
+**And** it becomes selectable again in active admin product pickers and shopping-list creation/edit paths (FR15, FR18, FR21)
+
+**Given** restoring an archived product would violate owner-scoped barcode uniqueness
+**When** I attempt the restore
+**Then** the system blocks restore with a clear duplicate-barcode conflict message
+**And** no data is partially updated (FR16, FR17)
+
 ## Epic 4: Published Shopping List (For-Sale) Management + Pricing Setup
 
 Enable admin to publish what shoppers can buy with pricing (unit + optional bundle offers) and availability controls, including creation of assorted groups sharing pricing rules and a pooled available quantity.

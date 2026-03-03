@@ -52,12 +52,18 @@ export type ArchiveProductInput = {
   nowMs?: number;
 };
 
+export type RestoreProductInput = {
+  productId: number;
+  nowMs?: number;
+};
+
 export type DeleteProductInput = {
   productId: number;
 };
 
 type ListProductsOptions = {
   includeArchived?: boolean;
+  archivedOnly?: boolean;
 };
 
 type DeleteProductResult = {
@@ -83,6 +89,8 @@ const PRODUCT_BARCODE_CONFLICT_MESSAGE =
   "A product with this barcode already exists for the active owner.";
 const PRODUCT_INPUT_INVALID_MESSAGE =
   "Product name and barcode are required.";
+const PRODUCT_RESTORE_REQUIRES_ARCHIVED_MESSAGE =
+  "Only archived products can be restored.";
 const PRODUCT_DELETE_DEPENDENCY_CONFLICT_MESSAGE =
   "This product is still used by shopping-list items. Remove those references first, or archive the product instead.";
 const PRODUCT_OWNER_BARCODE_UNIQUE_INDEX_NAME = "idx_product_owner_barcode_unique";
@@ -226,7 +234,11 @@ export async function listProducts(
   const db = getDb();
 
   try {
-    const archivedFilter = options.includeArchived ? "" : "AND archived_at_ms IS NULL";
+    const archivedFilter = options.archivedOnly
+      ? "AND archived_at_ms IS NOT NULL"
+      : options.includeArchived
+        ? ""
+        : "AND archived_at_ms IS NULL";
     const rows = await db.getAllAsync<ProductRow>(
       `SELECT id, owner_id, name, barcode, archived_at_ms, created_at_ms, updated_at_ms
        FROM ${PRODUCT_TABLE}
@@ -436,6 +448,82 @@ export async function archiveProduct(
     return { ok: true, value: mapProduct(updated) };
   } catch (error: unknown) {
     console.warn("[product-service] archiveProduct failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function restoreProduct(
+  input: RestoreProductInput,
+): Promise<OwnerScopeResult<Product>> {
+  const ownerContext = requireActiveOwnerContext();
+  if (!ownerContext.ok) {
+    return ownerContext;
+  }
+
+  await bootstrapDatabase();
+  try {
+    const db = getDb();
+    const existing = await findProductById(input.productId);
+    if (!existing) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+
+    if (existing.owner_id !== ownerContext.value.id) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_MISMATCH",
+          message: OWNER_SCOPE_MISMATCH_MESSAGE,
+        },
+      };
+    }
+    if (existing.archived_at_ms == null) {
+      return conflictError(PRODUCT_RESTORE_REQUIRES_ARCHIVED_MESSAGE);
+    }
+
+    await db.runAsync(
+      `UPDATE ${PRODUCT_TABLE}
+       SET archived_at_ms = NULL,
+           updated_at_ms = ?
+       WHERE id = ? AND owner_id = ?;`,
+      input.nowMs ?? Date.now(),
+      input.productId,
+      ownerContext.value.id,
+    );
+
+    const updated = await findProductById(input.productId);
+    if (!updated) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+
+    return { ok: true, value: mapProduct(updated) };
+  } catch (error: unknown) {
+    const mapped = mapConflictError(error);
+    if (mapped) {
+      return mapped;
+    }
+
+    console.warn("[product-service] restoreProduct failed", {
       reason: getSafeErrorReason(error),
     });
     return {
