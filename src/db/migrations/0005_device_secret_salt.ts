@@ -1,0 +1,13 @@
+import { APP_SECRET_TABLE, CREATE_APP_SECRET_TABLE_SQL } from "@/db/schema";
+
+const SHOPPER_PIN_SALT_SECRET_KEY = "shopper_pin_salt_hex";
+
+export const DEVICE_SECRET_SALT_MIGRATION_STATEMENTS = [
+  CREATE_APP_SECRET_TABLE_SQL,
+  `INSERT INTO ${APP_SECRET_TABLE}(key, value)
+   SELECT '${SHOPPER_PIN_SALT_SECRET_KEY}', lower(hex(randomblob(16)))
+   WHERE NOT EXISTS (
+     SELECT 1 FROM ${APP_SECRET_TABLE}
+     WHERE key = '${SHOPPER_PIN_SALT_SECRET_KEY}'
+   );`,
+];

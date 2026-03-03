@@ -14,3 +14,20 @@ user_name: myjmyj
 communication_language: English
 document_output_language: English
 output_folder: "{project-root}/_bmad-output"
+
+# Retrospective facilitation preference
+# Always run retrospectives interactively (party-style dialogue + user checkpoints),
+# never as a one-pass auto-generated report.
+retrospective_interaction_required: true
+
+# Global UX direction policy
+# Apply to all epics and all stories unless explicitly overridden by user.
+ux_direction_default: "B"
+ux_direction_mandatory_for_all_epics_and_stories: true
+ux_review_fail_on_noncompliance: true
+ux_design_reference: "{project-root}/_bmad-output/planning-artifacts/ux-design-directions.html"
+ux_direction_b_required_checks:
+  - "Direction B visual language"
+  - "Rounded typography/font stack compliance"
+  - "Soft UI token compliance (cards/shadows/depth)"
+  - "Screenshot evidence attached in story review"

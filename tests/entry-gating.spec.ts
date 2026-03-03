@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -372,6 +373,40 @@ async function runEntryGateTests() {
         appRoutes.includes("/create-master-admin") &&
         appRoutes.includes("/login"),
       "Expected logged-out entry routes should be present in Expo Router route files.",
+    );
+
+    // Dev HMR can keep module state alive, but a real app restart must begin with
+    // a new process and no persisted in-memory admin session.
+    const processWithSession = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        "const session=require('./.tmp-tests/src/domain/services/admin-session.js');session.setAdminSession({id:1,username:'admin'});if(!session.isAdminAuthenticated())process.exit(1);",
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      },
+    );
+    assert(
+      processWithSession.status === 0,
+      `Expected first fresh process to create an in-memory authenticated session. stderr: ${processWithSession.stderr}`,
+    );
+
+    const restartedProcess = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        "const session=require('./.tmp-tests/src/domain/services/admin-session.js');if(session.isAdminAuthenticated())process.exit(1);if(session.getAdminSession()!==null)process.exit(1);",
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      },
+    );
+    assert(
+      restartedProcess.status === 0,
+      `Expected app-process restart behavior to begin logged out with no persisted admin session. stderr: ${restartedProcess.stderr}`,
     );
   } finally {
     console.warn = originalWarn;
