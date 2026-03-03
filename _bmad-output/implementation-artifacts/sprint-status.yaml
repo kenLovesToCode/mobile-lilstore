@@ -53,7 +53,7 @@ development_status:
   2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: done
   epic-2-retrospective: optional
   epic-3: in-progress
-  3-1-create-and-edit-products-name-barcode: ready-for-dev
+  3-1-create-and-edit-products-name-barcode: done
   3-2-prevent-duplicate-barcodes-within-an-owner: backlog
   3-3-archive-or-delete-products: backlog
   epic-3-retrospective: optional

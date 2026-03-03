@@ -70,6 +70,127 @@ describe("owner-scoped services", () => {
     );
   });
 
+  it("creates products with trimmed inputs in the active owner scope", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 44,
+      owner_id: 11,
+      name: "Milk",
+      barcode: "A-1",
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+
+    const result = await productService.createProduct({
+      name: "  Milk  ",
+      barcode: "  A-1  ",
+      nowMs: 100,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 44,
+        ownerId: 11,
+        name: "Milk",
+        barcode: "A-1",
+        createdAtMs: 100,
+        updatedAtMs: 100,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO product"),
+      11,
+      "Milk",
+      "A-1",
+      100,
+      100,
+    );
+  });
+
+  it("updates products with trimmed inputs in the active owner scope", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk Updated",
+        barcode: "A-2",
+        created_at_ms: 100,
+        updated_at_ms: 300,
+      });
+
+    const result = await productService.updateProduct({
+      productId: 44,
+      name: "  Milk Updated  ",
+      barcode: "  A-2  ",
+      nowMs: 300,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 44,
+        ownerId: 11,
+        name: "Milk Updated",
+        barcode: "A-2",
+        createdAtMs: 100,
+        updatedAtMs: 300,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE product"),
+      "Milk Updated",
+      "A-2",
+      300,
+      44,
+      11,
+    );
+  });
+
+  it("rejects empty product name/barcode on create and update", async () => {
+    const createResult = await productService.createProduct({
+      name: "   ",
+      barcode: "   ",
+    });
+
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 77,
+      owner_id: 11,
+      name: "Existing",
+      barcode: "X-1",
+      created_at_ms: 1,
+      updated_at_ms: 1,
+    });
+    const updateResult = await productService.updateProduct({
+      productId: 77,
+      name: " ",
+      barcode: " ",
+    });
+
+    expect(createResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message: "Product name and barcode are required.",
+      },
+    });
+    expect(updateResult).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_INVALID_INPUT",
+        message: "Product name and barcode are required.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
   it("does not expose shopper pin data in read models", async () => {
     mockDb.getAllAsync.mockResolvedValueOnce([
       {

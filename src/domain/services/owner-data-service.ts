@@ -87,6 +87,7 @@ export {
   createShopper,
   getProductById,
   getShopperById,
+  listProducts,
   recordPayment,
   recordPurchase,
   updateProduct,
