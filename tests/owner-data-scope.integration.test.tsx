@@ -584,6 +584,94 @@ describe("owner-data owner-scope integration", () => {
     expect(screen.getByDisplayValue("A-1")).toBeTruthy();
   });
 
+  it("allows the same barcode in a different owner after owner switch while keeping conflict handling owner-scoped", async () => {
+    mockCreateProduct.mockImplementation(
+      ({ name, barcode }: { name: string; barcode: string }) => {
+        const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+        if (!activeOwner) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+              message: "Select an active owner before managing owner-scoped data.",
+            },
+          });
+        }
+
+        const ownerId = activeOwner.id;
+        const normalizedBarcode = barcode.trim().toLowerCase();
+        const hasDuplicateForOwner = (ownerProducts[ownerId] ?? []).some(
+          (product) => product.barcode.toLowerCase() === normalizedBarcode,
+        );
+
+        if (hasDuplicateForOwner) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_CONFLICT",
+              message: "A product with this barcode already exists for the active owner.",
+            },
+          });
+        }
+
+        const nowMs = Date.now();
+        const nextId =
+          Math.max(0, ...(ownerProducts[ownerId] ?? []).map((product) => product.id)) + 1;
+        const created = {
+          id: nextId,
+          ownerId,
+          name,
+          barcode,
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+        };
+        ownerProducts[ownerId] = [created, ...(ownerProducts[ownerId] ?? [])];
+
+        return Promise.resolve({ ok: true, value: created });
+      },
+    );
+
+    await renderProductsRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Product Name"), "Owner A Duplicate");
+    fireEvent.changeText(screen.getByLabelText("Product Barcode"), "a-1");
+    fireEvent.press(screen.getByLabelText("Submit Create Product"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("A product with this barcode already exists for the active owner."),
+      ).toBeTruthy();
+    });
+
+    expect(screen.getByDisplayValue("Owner A Duplicate")).toBeTruthy();
+    expect(screen.getByDisplayValue("a-1")).toBeTruthy();
+
+    act(() => {
+      setActiveOwner({ id: 202, name: "Owner B" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner B")).toBeTruthy();
+      expect(screen.getByText("Product B")).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Product Name"), "Owner B Reuse");
+    fireEvent.changeText(screen.getByLabelText("Product Barcode"), "A-1");
+    fireEvent.press(screen.getByLabelText("Submit Create Product"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Owner B Reuse")).toBeTruthy();
+    });
+
+    expect(screen.queryByDisplayValue("Owner A Duplicate")).toBeFalsy();
+    expect(ownerProducts[202].some((product) => product.barcode === "A-1")).toBe(true);
+  });
+
   it("preserves visible products and edit state on transient refresh failures", async () => {
     await renderProductsRoute();
 

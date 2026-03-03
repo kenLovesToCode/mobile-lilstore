@@ -54,7 +54,7 @@ development_status:
   epic-2-retrospective: optional
   epic-3: in-progress
   3-1-create-and-edit-products-name-barcode: done
-  3-2-prevent-duplicate-barcodes-within-an-owner: backlog
+  3-2-prevent-duplicate-barcodes-within-an-owner: done
   3-3-archive-or-delete-products: backlog
   epic-3-retrospective: optional
   epic-4: backlog

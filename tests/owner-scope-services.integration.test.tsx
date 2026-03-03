@@ -330,7 +330,7 @@ describe("owner-scoped services", () => {
 
   it("returns conflict error for duplicate barcode", async () => {
     mockDb.runAsync.mockRejectedValueOnce(
-      new Error("UNIQUE constraint failed: product.owner_id, product.barcode"),
+      new Error("UNIQUE constraint failed: index 'idx_product_owner_barcode_unique'"),
     );
 
     const result = await productService.createProduct({
@@ -345,6 +345,121 @@ describe("owner-scoped services", () => {
         message: "A product with this barcode already exists for the active owner.",
       },
     });
+  });
+
+  it("returns a generic conflict error for unexpected unique constraint failures", async () => {
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error("UNIQUE constraint failed: index 'idx_product_owner_id_unique'"),
+    );
+
+    const result = await productService.createProduct({
+      name: "Milk",
+      barcode: "A-1",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "This operation conflicts with existing owner-scoped data.",
+      },
+    });
+  });
+
+  it("keeps duplicate-barcode uniqueness enforced at the DB index boundary", () => {
+    const schema = require("@/db/schema");
+
+    expect(schema.CREATE_PRODUCT_OWNER_BARCODE_UNIQUE_INDEX_SQL).toContain(
+      "CREATE UNIQUE INDEX",
+    );
+    expect(schema.CREATE_PRODUCT_OWNER_BARCODE_UNIQUE_INDEX_SQL).toContain(
+      "owner_id, lower(barcode)",
+    );
+  });
+
+  it("returns deterministic conflict error for duplicate barcode on update (case-insensitive)", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 44,
+      owner_id: 11,
+      name: "Milk",
+      barcode: "ABC-1",
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error("UNIQUE constraint failed: index 'idx_product_owner_barcode_unique'"),
+    );
+
+    const result = await productService.updateProduct({
+      productId: 44,
+      name: "Milk Updated",
+      barcode: "abc-1",
+      nowMs: 300,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A product with this barcode already exists for the active owner.",
+      },
+    });
+  });
+
+  it("allows the same barcode across owners without leaking prior conflict state", async () => {
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error("UNIQUE constraint failed: index 'idx_product_owner_barcode_unique'"),
+    );
+
+    const ownerAConflict = await productService.createProduct({
+      name: "Owner A Milk",
+      barcode: "A-1",
+    });
+
+    expect(ownerAConflict).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message: "A product with this barcode already exists for the active owner.",
+      },
+    });
+
+    session.setActiveOwner({ id: 22, name: "Owner B" });
+    mockDb.runAsync.mockResolvedValueOnce({ changes: 1, lastInsertRowId: 55 });
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 55,
+      owner_id: 22,
+      name: "Owner B Milk",
+      barcode: "A-1",
+      created_at_ms: 200,
+      updated_at_ms: 200,
+    });
+
+    const ownerBResult = await productService.createProduct({
+      name: "Owner B Milk",
+      barcode: "A-1",
+      nowMs: 200,
+    });
+
+    expect(ownerBResult).toEqual({
+      ok: true,
+      value: {
+        id: 55,
+        ownerId: 22,
+        name: "Owner B Milk",
+        barcode: "A-1",
+        createdAtMs: 200,
+        updatedAtMs: 200,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenLastCalledWith(
+      expect.stringContaining("INSERT INTO product"),
+      22,
+      "Owner B Milk",
+      "A-1",
+      200,
+      200,
+    );
   });
 
   it("stores derived shopper pin payload instead of plaintext pin digits", async () => {

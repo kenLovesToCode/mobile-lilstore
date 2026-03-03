@@ -61,17 +61,28 @@ const PRODUCT_BARCODE_CONFLICT_MESSAGE =
   "A product with this barcode already exists for the active owner.";
 const PRODUCT_INPUT_INVALID_MESSAGE =
   "Product name and barcode are required.";
+const PRODUCT_OWNER_BARCODE_UNIQUE_INDEX_NAME = "idx_product_owner_barcode_unique";
 
 function mapConflictError(error: unknown): OwnerScopeResult<never> | null {
   if (!(error instanceof Error)) {
     return null;
   }
 
-  if (/UNIQUE constraint failed/i.test(error.message)) {
+  const message = error.message ?? "";
+  if (!/UNIQUE constraint failed/i.test(message)) {
+    return null;
+  }
+
+  const isBarcodeConflict =
+    message.includes(PRODUCT_OWNER_BARCODE_UNIQUE_INDEX_NAME) ||
+    /lower\(barcode\)/i.test(message) ||
+    /\bbarcode\b/i.test(message);
+
+  if (isBarcodeConflict) {
     return conflictError(PRODUCT_BARCODE_CONFLICT_MESSAGE);
   }
 
-  return null;
+  return conflictError();
 }
 
 function validateProductInput(name: string, barcode: string): OwnerScopeResult<never> | null {
