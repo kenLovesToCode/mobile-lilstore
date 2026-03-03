@@ -2,6 +2,7 @@ import { bootstrapDatabase, getDb } from "@/db/db";
 import { PRODUCT_TABLE, SHOPPING_LIST_ITEM_TABLE } from "@/db/schema";
 import {
   type OwnerScopeResult,
+  conflictError,
   invalidInputError,
   OWNER_SCOPE_MISMATCH_MESSAGE,
   OWNER_SCOPE_NOT_FOUND_MESSAGE,
@@ -12,6 +13,7 @@ import {
 
 type ProductOwnerRow = {
   owner_id: number;
+  archived_at_ms: number | null;
 };
 
 type ShoppingListItemRow = {
@@ -50,6 +52,8 @@ export type UpdateShoppingListItemInput = {
 
 const SHOPPING_LIST_INPUT_INVALID_MESSAGE =
   "Quantity must be a positive integer and unit price must be a non-negative integer.";
+const SHOPPING_LIST_ARCHIVED_PRODUCT_CONFLICT_MESSAGE =
+  "Archived products cannot be used in active shopping-list entries. Select an active product.";
 
 function mapItem(row: ShoppingListItemRow): ShoppingListItem {
   return {
@@ -66,7 +70,7 @@ function mapItem(row: ShoppingListItemRow): ShoppingListItem {
 async function findProductOwner(productId: number) {
   const db = getDb();
   return db.getFirstAsync<ProductOwnerRow>(
-    `SELECT owner_id FROM ${PRODUCT_TABLE} WHERE id = ? LIMIT 1;`,
+    `SELECT owner_id, archived_at_ms FROM ${PRODUCT_TABLE} WHERE id = ? LIMIT 1;`,
     productId,
   );
 }
@@ -133,6 +137,9 @@ export async function addShoppingListItem(
       },
     };
   }
+  if (productOwner.archived_at_ms != null) {
+    return conflictError(SHOPPING_LIST_ARCHIVED_PRODUCT_CONFLICT_MESSAGE);
+  }
 
   const nowMs = input.nowMs ?? Date.now();
 
@@ -188,10 +195,20 @@ export async function listShoppingListItems(): Promise<
 
   try {
     const rows = await db.getAllAsync<ShoppingListItemRow>(
-      `SELECT id, owner_id, product_id, quantity, unit_price_cents, created_at_ms, updated_at_ms
-       FROM ${SHOPPING_LIST_ITEM_TABLE}
-       WHERE owner_id = ?
-       ORDER BY created_at_ms DESC, id DESC;`,
+      `SELECT item.id,
+              item.owner_id,
+              item.product_id,
+              item.quantity,
+              item.unit_price_cents,
+              item.created_at_ms,
+              item.updated_at_ms
+       FROM ${SHOPPING_LIST_ITEM_TABLE} AS item
+       INNER JOIN ${PRODUCT_TABLE} AS product
+         ON product.id = item.product_id
+        AND product.owner_id = item.owner_id
+       WHERE item.owner_id = ?
+         AND product.archived_at_ms IS NULL
+       ORDER BY item.created_at_ms DESC, item.id DESC;`,
       ownerContext.value.id,
     );
     return { ok: true, value: rows.map(mapItem) };
@@ -243,6 +260,29 @@ export async function updateShoppingListItem(
         message: OWNER_SCOPE_MISMATCH_MESSAGE,
       },
     };
+  }
+
+  const productOwner = await findProductOwner(existing.product_id);
+  if (!productOwner) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+      },
+    };
+  }
+  if (productOwner.owner_id !== ownerContext.value.id) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: OWNER_SCOPE_MISMATCH_MESSAGE,
+      },
+    };
+  }
+  if (productOwner.archived_at_ms != null) {
+    return conflictError(SHOPPING_LIST_ARCHIVED_PRODUCT_CONFLICT_MESSAGE);
   }
 
   try {

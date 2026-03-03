@@ -10,6 +10,10 @@ import {
   ensureShopperPinKeyColumn,
 } from "@/db/migrations/0004_shopper_pin_hash_global_uniqueness";
 import { DEVICE_SECRET_SALT_MIGRATION_STATEMENTS } from "@/db/migrations/0005_device_secret_salt";
+import {
+  PRODUCT_ARCHIVE_LIFECYCLE_MIGRATION_STATEMENTS,
+  ensureProductArchiveColumn,
+} from "@/db/migrations/0006_product_archive_lifecycle";
 
 const DATABASE_NAME = "lilstore.db";
 const db = SQLite.openDatabaseSync(DATABASE_NAME);
@@ -33,6 +37,10 @@ export async function bootstrapDatabase() {
   if (!bootstrapPromise) {
     bootstrapPromise = (async () => {
       for (const statement of BASE_MIGRATION_STATEMENTS) {
+        await db.execAsync(statement);
+      }
+      await ensureProductArchiveColumn(db);
+      for (const statement of PRODUCT_ARCHIVE_LIFECYCLE_MIGRATION_STATEMENTS) {
         await db.execAsync(statement);
       }
       for (const statement of DEVICE_SECRET_SALT_MIGRATION_STATEMENTS) {

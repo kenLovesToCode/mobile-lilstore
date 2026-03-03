@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS ${PRODUCT_TABLE} (
   owner_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   barcode TEXT NOT NULL,
+  archived_at_ms INTEGER,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES ${STORE_OWNER_TABLE}(id) ON DELETE CASCADE
@@ -66,6 +67,11 @@ ON ${PRODUCT_TABLE}(owner_id, lower(barcode));
 export const CREATE_PRODUCT_OWNER_CREATED_AT_INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_product_owner_created_at
 ON ${PRODUCT_TABLE}(owner_id, created_at_ms DESC, id DESC);
+`;
+
+export const CREATE_PRODUCT_OWNER_ARCHIVED_CREATED_AT_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_product_owner_archived_created_at
+ON ${PRODUCT_TABLE}(owner_id, archived_at_ms, created_at_ms DESC, id DESC);
 `;
 
 export const CREATE_PRODUCT_OWNER_ID_UNIQUE_INDEX_SQL = `

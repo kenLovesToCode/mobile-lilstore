@@ -15,7 +15,9 @@ import {
   subscribeToAdminSession,
 } from "@/domain/services/admin-session";
 import {
+  archiveProduct,
   createProduct,
+  deleteProduct,
   listProducts,
   updateProduct,
 } from "@/domain/services/owner-data-service";
@@ -49,7 +51,12 @@ export default function ProductsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
-  const submitLockRef = useRef<"create" | "update" | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteConfirmProductId, setDeleteConfirmProductId] = useState<number | null>(null);
+  const submitLockRef = useRef<
+    "create" | "update" | "archive" | "delete" | null
+  >(null);
   const ownerContextVersionRef = useRef(0);
   const latestRefreshRequestRef = useRef(0);
   const selectedProductIdRef = useRef<number | null>(null);
@@ -106,6 +113,7 @@ export default function ProductsScreen() {
         !result.value.some((product) => product.id === currentSelectedProductId)
       ) {
         setSelectedProductId(null);
+        setDeleteConfirmProductId(null);
         setEditName("");
         setEditBarcode("");
       }
@@ -136,7 +144,10 @@ export default function ProductsScreen() {
       setCreateBarcode("");
       setEditName("");
       setEditBarcode("");
+      setDeleteConfirmProductId(null);
       setIsRefreshing(false);
+      setIsArchiving(false);
+      setIsDeleting(false);
       lastOwnerIdRef.current = null;
       return;
     }
@@ -149,6 +160,7 @@ export default function ProductsScreen() {
       setCreateBarcode("");
       setEditName("");
       setEditBarcode("");
+      setDeleteConfirmProductId(null);
       lastOwnerIdRef.current = activeOwnerId;
     }
 
@@ -157,6 +169,7 @@ export default function ProductsScreen() {
 
   function onSelectProduct(product: ProductListItem) {
     setSelectedProductId(product.id);
+    setDeleteConfirmProductId(null);
     setEditName(product.name);
     setEditBarcode(product.barcode);
     setErrorMessage(null);
@@ -167,6 +180,8 @@ export default function ProductsScreen() {
       !activeOwner ||
       isCreating ||
       isUpdating ||
+      isArchiving ||
+      isDeleting ||
       submitLockRef.current !== null
     ) {
       return;
@@ -221,6 +236,8 @@ export default function ProductsScreen() {
       !selectedProduct ||
       isUpdating ||
       isCreating ||
+      isArchiving ||
+      isDeleting ||
       submitLockRef.current !== null
     ) {
       return;
@@ -267,9 +284,131 @@ export default function ProductsScreen() {
     }
   }
 
-  const createButtonDisabled = !activeOwner || isCreating || isUpdating;
+  async function onArchiveProduct() {
+    if (
+      !activeOwner ||
+      !selectedProduct ||
+      isArchiving ||
+      isDeleting ||
+      isCreating ||
+      isUpdating ||
+      submitLockRef.current !== null
+    ) {
+      return;
+    }
+
+    submitLockRef.current = "archive";
+    const ownerContextVersion = ownerContextVersionRef.current;
+    setIsArchiving(true);
+    try {
+      const result = await archiveProduct({
+        productId: selectedProduct.id,
+      });
+      if (ownerContextVersion !== ownerContextVersionRef.current) {
+        return;
+      }
+
+      if (!result.ok) {
+        setErrorMessage(result.error.message);
+        return;
+      }
+
+      setDeleteConfirmProductId(null);
+      setSelectedProductId(null);
+      setEditName("");
+      setEditBarcode("");
+      await refreshProducts();
+    } catch {
+      if (ownerContextVersion !== ownerContextVersionRef.current) {
+        return;
+      }
+      setErrorMessage("Unable to archive product right now. Please try again.");
+    } finally {
+      if (submitLockRef.current === "archive") {
+        submitLockRef.current = null;
+      }
+      setIsArchiving(false);
+    }
+  }
+
+  async function onDeleteProduct() {
+    if (
+      !activeOwner ||
+      !selectedProduct ||
+      isDeleting ||
+      isArchiving ||
+      isCreating ||
+      isUpdating ||
+      submitLockRef.current !== null
+    ) {
+      return;
+    }
+
+    if (deleteConfirmProductId !== selectedProduct.id) {
+      setDeleteConfirmProductId(selectedProduct.id);
+      setErrorMessage("Press Delete Product again to confirm permanent removal.");
+      return;
+    }
+
+    submitLockRef.current = "delete";
+    const ownerContextVersion = ownerContextVersionRef.current;
+    setIsDeleting(true);
+    try {
+      const result = await deleteProduct({
+        productId: selectedProduct.id,
+      });
+      if (ownerContextVersion !== ownerContextVersionRef.current) {
+        return;
+      }
+
+      if (!result.ok) {
+        setDeleteConfirmProductId(null);
+        setErrorMessage(result.error.message);
+        return;
+      }
+
+      setDeleteConfirmProductId(null);
+      setSelectedProductId(null);
+      setEditName("");
+      setEditBarcode("");
+      await refreshProducts();
+    } catch {
+      if (ownerContextVersion !== ownerContextVersionRef.current) {
+        return;
+      }
+      setDeleteConfirmProductId(null);
+      setErrorMessage("Unable to delete product right now. Please try again.");
+    } finally {
+      if (submitLockRef.current === "delete") {
+        submitLockRef.current = null;
+      }
+      setIsDeleting(false);
+    }
+  }
+
+  const createButtonDisabled =
+    !activeOwner || isCreating || isUpdating || isArchiving || isDeleting;
   const updateButtonDisabled =
-    !activeOwner || !selectedProduct || isCreating || isUpdating;
+    !activeOwner ||
+    !selectedProduct ||
+    isCreating ||
+    isUpdating ||
+    isArchiving ||
+    isDeleting;
+  const archiveButtonDisabled =
+    !activeOwner ||
+    !selectedProduct ||
+    isCreating ||
+    isUpdating ||
+    isArchiving ||
+    isDeleting;
+  const deleteButtonDisabled =
+    !activeOwner ||
+    !selectedProduct ||
+    isCreating ||
+    isUpdating ||
+    isArchiving ||
+    isDeleting;
 
   const productsEmptyMessage = !activeOwner
     ? "Product list is unavailable until an owner is selected."
@@ -392,6 +531,45 @@ export default function ProductsScreen() {
                     {isUpdating ? "Saving..." : "Save Product Changes"}
                   </Text>
                 </Pressable>
+                <Pressable
+                  accessibilityLabel="Archive Selected Product"
+                  accessibilityRole="button"
+                  disabled={archiveButtonDisabled}
+                  onPress={() => void onArchiveProduct()}
+                  style={({ pressed }) => [
+                    styles.secondaryActionButton,
+                    pressed && !archiveButtonDisabled && styles.buttonPressed,
+                    archiveButtonDisabled && styles.buttonDisabled,
+                  ]}
+                >
+                  <Text style={styles.secondaryActionButtonLabel}>
+                    {isArchiving ? "Archiving..." : "Archive Product"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Delete Selected Product"
+                  accessibilityRole="button"
+                  disabled={deleteButtonDisabled}
+                  onPress={() => void onDeleteProduct()}
+                  style={({ pressed }) => [
+                    styles.dangerButton,
+                    pressed && !deleteButtonDisabled && styles.buttonPressed,
+                    deleteButtonDisabled && styles.buttonDisabled,
+                  ]}
+                >
+                  <Text style={styles.dangerButtonLabel}>
+                    {isDeleting
+                      ? "Deleting..."
+                      : deleteConfirmProductId === selectedProduct?.id
+                        ? "Confirm Delete Product"
+                        : "Delete Product"}
+                  </Text>
+                </Pressable>
+                {deleteConfirmProductId === selectedProduct?.id ? (
+                  <Text style={styles.warningText}>
+                    Press Delete Product again to confirm permanent removal.
+                  </Text>
+                ) : null}
 
                 <Pressable
                   accessibilityRole="button"
@@ -523,6 +701,37 @@ const styles = StyleSheet.create({
   primaryButtonLabel: {
     color: "#FFFFFF",
     fontWeight: "700",
+  },
+  secondaryActionButton: {
+    minHeight: 42,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#D97706",
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryActionButtonLabel: {
+    color: "#92400E",
+    fontWeight: "700",
+  },
+  dangerButton: {
+    minHeight: 42,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#DC2626",
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerButtonLabel: {
+    color: "#991B1B",
+    fontWeight: "700",
+  },
+  warningText: {
+    color: "#991B1B",
+    fontSize: 12,
+    fontWeight: "600",
   },
   secondaryButton: {
     marginTop: 4,

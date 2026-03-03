@@ -9,7 +9,9 @@ import {
   recordPurchase,
 } from "@/domain/services/ledger-service";
 import {
+  archiveProduct,
   createProduct,
+  deleteProduct,
   getProductById,
   listProducts,
   updateProduct,
@@ -83,8 +85,10 @@ export async function getOwnerScopedSnapshot() {
 
 export {
   addShoppingListItem,
+  archiveProduct,
   createProduct,
   createShopper,
+  deleteProduct,
   getProductById,
   getShopperById,
   listProducts,

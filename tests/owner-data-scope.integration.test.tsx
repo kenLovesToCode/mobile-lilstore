@@ -11,6 +11,8 @@ const mockGetOwnerScopedSnapshot = jest.fn();
 const mockListProducts = jest.fn();
 const mockCreateProduct = jest.fn();
 const mockUpdateProduct = jest.fn();
+const mockArchiveProduct = jest.fn();
+const mockDeleteProduct = jest.fn();
 const mockCreateShopper = jest.fn();
 const mockUpdateShopper = jest.fn();
 const originalConsoleError = console.error;
@@ -20,6 +22,8 @@ jest.mock("@/domain/services/owner-data-service", () => ({
     mockGetOwnerScopedSnapshot(...args),
   listProducts: (...args: unknown[]) => mockListProducts(...args),
   createProduct: (...args: unknown[]) => mockCreateProduct(...args),
+  archiveProduct: (...args: unknown[]) => mockArchiveProduct(...args),
+  deleteProduct: (...args: unknown[]) => mockDeleteProduct(...args),
   createShopper: (...args: unknown[]) => mockCreateShopper(...args),
   addShoppingListItem: jest.fn(),
   recordPurchase: jest.fn(),
@@ -93,6 +97,8 @@ describe("owner-data owner-scope integration", () => {
     mockListProducts.mockReset();
     mockCreateProduct.mockReset();
     mockUpdateProduct.mockReset();
+    mockArchiveProduct.mockReset();
+    mockDeleteProduct.mockReset();
     mockCreateShopper.mockReset();
     mockUpdateShopper.mockReset();
     clearAdminSession();
@@ -264,6 +270,74 @@ describe("owner-data owner-scope integration", () => {
         return Promise.resolve({ ok: true, value: updated });
       },
     );
+
+    mockArchiveProduct.mockImplementation(({ productId }: { productId: number }) => {
+      const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+      if (!activeOwner) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+            message: "Select an active owner before managing owner-scoped data.",
+          },
+        });
+      }
+
+      const ownerId = activeOwner.id;
+      const currentProducts = ownerProducts[ownerId] ?? [];
+      const existing = currentProducts.find((product) => product.id === productId);
+      if (!existing) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_NOT_FOUND",
+            message: "Record not found in the active owner scope.",
+          },
+        });
+      }
+
+      ownerProducts[ownerId] = currentProducts.filter((product) => product.id !== productId);
+      return Promise.resolve({
+        ok: true,
+        value: {
+          ...existing,
+          archivedAtMs: Date.now(),
+          updatedAtMs: Date.now(),
+        },
+      });
+    });
+
+    mockDeleteProduct.mockImplementation(({ productId }: { productId: number }) => {
+      const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+      if (!activeOwner) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+            message: "Select an active owner before managing owner-scoped data.",
+          },
+        });
+      }
+
+      const ownerId = activeOwner.id;
+      const currentProducts = ownerProducts[ownerId] ?? [];
+      const existing = currentProducts.find((product) => product.id === productId);
+      if (!existing) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: "OWNER_SCOPE_NOT_FOUND",
+            message: "Record not found in the active owner scope.",
+          },
+        });
+      }
+
+      ownerProducts[ownerId] = currentProducts.filter((product) => product.id !== productId);
+      return Promise.resolve({
+        ok: true,
+        value: { deletedProductId: productId },
+      });
+    });
 
     mockCreateShopper.mockResolvedValue({
       ok: true,
@@ -454,6 +528,90 @@ describe("owner-data owner-scope integration", () => {
     expect(mockListProducts.mock.invocationCallOrder[2]).toBeGreaterThan(
       mockUpdateProduct.mock.invocationCallOrder[0],
     );
+  });
+
+  it("archives a selected product and removes it from the active list", async () => {
+    await renderProductsRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Product Product A"));
+    fireEvent.press(screen.getByLabelText("Archive Selected Product"));
+
+    await waitFor(() => {
+      expect(mockArchiveProduct).toHaveBeenCalledWith({
+        productId: 1,
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockListProducts).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("Product A")).toBeFalsy();
+    });
+  });
+
+  it("requires explicit confirmation before delete and then removes the product", async () => {
+    await renderProductsRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Product Product A"));
+    fireEvent.press(screen.getByLabelText("Delete Selected Product"));
+
+    expect(mockDeleteProduct).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText("Press Delete Product again to confirm permanent removal.").length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.press(screen.getByLabelText("Delete Selected Product"));
+
+    await waitFor(() => {
+      expect(mockDeleteProduct).toHaveBeenCalledWith({
+        productId: 1,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Product A")).toBeFalsy();
+    });
+  });
+
+  it("surfaces dependency conflict messaging when delete is blocked", async () => {
+    mockDeleteProduct.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message:
+          "This product is still used by shopping-list items. Remove those references first, or archive the product instead.",
+      },
+    });
+
+    await renderProductsRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+      expect(screen.getByText("Product A")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Product Product A"));
+    fireEvent.press(screen.getByLabelText("Delete Selected Product"));
+    fireEvent.press(screen.getByLabelText("Delete Selected Product"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "This product is still used by shopping-list items. Remove those references first, or archive the product instead.",
+        ),
+      ).toBeTruthy();
+    });
+
+    expect(screen.getByText("Product A")).toBeTruthy();
   });
 
   it("enforces synchronous submit locking for rapid create and edit taps", async () => {

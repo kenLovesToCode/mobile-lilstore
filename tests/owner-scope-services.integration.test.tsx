@@ -23,6 +23,9 @@ describe("owner-scoped services", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    mockDb.getAllAsync.mockReset();
+    mockDb.getFirstAsync.mockReset();
+    mockDb.runAsync.mockReset();
     mockBootstrapDatabase.mockResolvedValue(undefined);
     mockGetDb.mockReturnValue(mockDb);
     mockDb.getAllAsync.mockResolvedValue([]);
@@ -191,6 +194,178 @@ describe("owner-scoped services", () => {
     expect(mockDb.runAsync).not.toHaveBeenCalled();
   });
 
+  it("archives products in active owner scope with deterministic timestamps", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: null,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: 500,
+        created_at_ms: 100,
+        updated_at_ms: 500,
+      });
+
+    const result = await productService.archiveProduct({
+      productId: 44,
+      nowMs: 500,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 44,
+        ownerId: 11,
+        name: "Milk",
+        barcode: "A-1",
+        createdAtMs: 100,
+        updatedAtMs: 500,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("archived_at_ms = COALESCE(archived_at_ms, ?)"),
+      500,
+      500,
+      44,
+      11,
+    );
+  });
+
+  it("filters archived products from default list reads and allows explicit includeArchived reads", async () => {
+    mockDb.getAllAsync.mockResolvedValue([]);
+
+    await productService.listProducts();
+    await productService.listProducts({ includeArchived: true });
+
+    expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("archived_at_ms IS NULL"),
+      11,
+    );
+    expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
+      2,
+      expect.not.stringContaining("archived_at_ms IS NULL"),
+      11,
+    );
+  });
+
+  it("blocks hard-delete when shopping-list dependencies exist", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: null,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({ total: 1 });
+
+    const result = await productService.deleteProduct({
+      productId: 44,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message:
+          "This product is still used by shopping-list items. Remove those references first, or archive the product instead.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("hard-deletes a product when no shopping-list dependency exists", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 44,
+        owner_id: 11,
+        name: "Milk",
+        barcode: "A-1",
+        archived_at_ms: null,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({ total: 0 });
+
+    const result = await productService.deleteProduct({
+      productId: 44,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        deletedProductId: 44,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM product"),
+      44,
+      11,
+    );
+  });
+
+  it("rejects cross-owner product archive requests", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 33,
+      owner_id: 99,
+      name: "Owner B product",
+      barcode: "B-1",
+      archived_at_ms: null,
+      created_at_ms: 1,
+      updated_at_ms: 1,
+    });
+
+    const result = await productService.archiveProduct({
+      productId: 33,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: "The requested record belongs to a different owner.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-owner product delete requests", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 33,
+      owner_id: 99,
+      name: "Owner B product",
+      barcode: "B-1",
+      archived_at_ms: null,
+      created_at_ms: 1,
+      updated_at_ms: 1,
+    });
+
+    const result = await productService.deleteProduct({
+      productId: 33,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: "The requested record belongs to a different owner.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
   it("does not expose shopper pin data in read models", async () => {
     mockDb.getAllAsync.mockResolvedValueOnce([
       {
@@ -262,6 +437,81 @@ describe("owner-scoped services", () => {
       },
     });
     expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects adding shopping-list items that reference archived products", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      owner_id: 11,
+      archived_at_ms: 1234,
+    });
+
+    const result = await shoppingListService.addShoppingListItem({
+      productId: 444,
+      quantity: 1,
+      unitPriceCents: 100,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message:
+          "Archived products cannot be used in active shopping-list entries. Select an active product.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects shopping-list item edits when the referenced product is archived", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 81,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 1,
+        unit_price_cents: 100,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+      })
+      .mockResolvedValueOnce({
+        owner_id: 11,
+        archived_at_ms: 5678,
+      });
+
+    const result = await shoppingListService.updateShoppingListItem({
+      itemId: 81,
+      quantity: 2,
+      unitPriceCents: 100,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message:
+          "Archived products cannot be used in active shopping-list entries. Select an active product.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("filters archived products out of active shopping-list reads", async () => {
+    mockDb.getAllAsync.mockResolvedValueOnce([]);
+
+    const result = await shoppingListService.listShoppingListItems();
+
+    expect(result).toEqual({
+      ok: true,
+      value: [],
+    });
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(
+      expect.stringContaining("INNER JOIN product AS product"),
+      11,
+    );
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(
+      expect.stringContaining("product.archived_at_ms IS NULL"),
+      11,
+    );
   });
 
   it("rejects payments when shopper belongs to a different owner", async () => {
