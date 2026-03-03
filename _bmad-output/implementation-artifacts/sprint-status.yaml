@@ -46,14 +46,14 @@ development_status:
   1-3-admin-login-protected-admin-session-non-persistent: done
   1-4-admin-logout: done
   epic-1-retrospective: done
-  epic-2: in-progress
+  epic-2: done
   2-1-create-and-switch-store-owners: done
   2-2-owner-data-isolation-enforcement: done
   2-3-manage-shoppers-per-owner-with-unique-pins: done
   2-4-shopper-pin-lookup-is-unambiguous-device-wide-uniqueness: done
   epic-2-retrospective: optional
-  epic-3: backlog
-  3-1-create-and-edit-products-name-barcode: backlog
+  epic-3: in-progress
+  3-1-create-and-edit-products-name-barcode: ready-for-dev
   3-2-prevent-duplicate-barcodes-within-an-owner: backlog
   3-3-archive-or-delete-products: backlog
   epic-3-retrospective: optional
