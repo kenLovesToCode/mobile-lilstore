@@ -28,6 +28,7 @@ import {
 import {
   addShoppingListItem,
   listShoppingListItems,
+  removeShoppingListItem,
   updateShoppingListItem,
   type ShoppingListItem,
 } from "@/domain/services/shopping-list-service";
@@ -93,8 +94,10 @@ export {
   getProductById,
   getShopperById,
   listProducts,
+  listShoppingListItems,
   recordPayment,
   recordPurchase,
+  removeShoppingListItem,
   restoreProduct,
   updateProduct,
   updateShopper,

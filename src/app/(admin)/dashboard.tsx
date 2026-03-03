@@ -135,6 +135,18 @@ export default function AdminDashboardScreen() {
         </Pressable>
 
         <Pressable
+          accessibilityLabel="Go to Shopping List"
+          accessibilityRole="button"
+          onPress={() => router.push("./shopping-list")}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.secondaryButtonPressed,
+          ]}
+        >
+          <Text style={styles.secondaryButtonLabel}>Go to Shopping List</Text>
+        </Pressable>
+
+        <Pressable
           accessibilityLabel="Log Out"
           accessibilityRole="button"
           disabled={isLoggingOut}

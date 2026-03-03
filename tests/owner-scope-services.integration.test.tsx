@@ -19,6 +19,7 @@ describe("owner-scoped services", () => {
   let shoppingListService: typeof import("@/domain/services/shopping-list-service");
   let ledgerService: typeof import("@/domain/services/ledger-service");
   let shopperService: typeof import("@/domain/services/shopper-service");
+  let ownerDataService: typeof import("@/domain/services/owner-data-service");
 
   beforeEach(() => {
     jest.resetModules();
@@ -46,6 +47,7 @@ describe("owner-scoped services", () => {
     shopperService = require("@/domain/services/shopper-service");
     shoppingListService = require("@/domain/services/shopping-list-service");
     ledgerService = require("@/domain/services/ledger-service");
+    ownerDataService = require("@/domain/services/owner-data-service");
   });
 
   afterAll(() => {
@@ -673,6 +675,240 @@ describe("owner-scoped services", () => {
     expect(mockDb.runAsync).not.toHaveBeenCalled();
   });
 
+  it("creates shopping-list items in active owner scope with deterministic values", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        owner_id: 11,
+        archived_at_ms: null,
+      })
+      .mockResolvedValueOnce({
+        id: 901,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 3,
+        unit_price_cents: 199,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      });
+    mockDb.runAsync.mockResolvedValueOnce({
+      changes: 1,
+      lastInsertRowId: 901,
+    });
+
+    const result = await shoppingListService.addShoppingListItem({
+      productId: 444,
+      quantity: 3,
+      unitPriceCents: 199,
+      nowMs: 100,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 901,
+        ownerId: 11,
+        productId: 444,
+        quantity: 3,
+        unitPriceCents: 199,
+        createdAtMs: 100,
+        updatedAtMs: 100,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO shopping_list_item"),
+      11,
+      444,
+      3,
+      199,
+      100,
+      100,
+    );
+  });
+
+  it("returns deterministic conflict error when publishing duplicate owner/product shopping-list entries", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      owner_id: 11,
+      archived_at_ms: null,
+    });
+    mockDb.runAsync.mockRejectedValueOnce(
+      new Error(
+        "UNIQUE constraint failed: index 'idx_shopping_list_item_owner_product_unique'",
+      ),
+    );
+
+    const result = await shoppingListService.addShoppingListItem({
+      productId: 444,
+      quantity: 2,
+      unitPriceCents: 125,
+      nowMs: 250,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_CONFLICT",
+        message:
+          "This product is already published in the shopping list for the active owner.",
+      },
+    });
+  });
+
+  it("updates shopping-list items in active owner scope with deterministic values", async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 901,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 3,
+        unit_price_cents: 199,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+      })
+      .mockResolvedValueOnce({
+        owner_id: 11,
+        archived_at_ms: null,
+      })
+      .mockResolvedValueOnce({
+        id: 901,
+        owner_id: 11,
+        product_id: 444,
+        quantity: 5,
+        unit_price_cents: 250,
+        created_at_ms: 100,
+        updated_at_ms: 200,
+      });
+
+    const result = await shoppingListService.updateShoppingListItem({
+      itemId: 901,
+      quantity: 5,
+      unitPriceCents: 250,
+      nowMs: 200,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: 901,
+        ownerId: 11,
+        productId: 444,
+        quantity: 5,
+        unitPriceCents: 250,
+        createdAtMs: 100,
+        updatedAtMs: 200,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE shopping_list_item"),
+      5,
+      250,
+      200,
+      901,
+      11,
+    );
+  });
+
+  it("removes shopping-list items in active owner scope", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 901,
+      owner_id: 11,
+      product_id: 444,
+      quantity: 3,
+      unit_price_cents: 199,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync.mockResolvedValueOnce({
+      changes: 1,
+      lastInsertRowId: 0,
+    });
+
+    const result = await shoppingListService.removeShoppingListItem({
+      itemId: 901,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        removedItemId: 901,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM shopping_list_item"),
+      901,
+      11,
+    );
+  });
+
+  it("returns not-found when remove delete changes are zero after pre-check", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 901,
+      owner_id: 11,
+      product_id: 444,
+      quantity: 3,
+      unit_price_cents: 199,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync.mockResolvedValueOnce({
+      changes: 0,
+      lastInsertRowId: 0,
+    });
+
+    const result = await shoppingListService.removeShoppingListItem({
+      itemId: 901,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: "Record not found in the active owner scope.",
+      },
+    });
+  });
+
+  it("rejects removing shopping-list items from another owner scope", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 901,
+      owner_id: 99,
+      product_id: 444,
+      quantity: 3,
+      unit_price_cents: 199,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+
+    const result = await shoppingListService.removeShoppingListItem({
+      itemId: 901,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: "The requested record belongs to a different owner.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects removing missing shopping-list items with deterministic not-found mapping", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce(null);
+
+    const result = await shoppingListService.removeShoppingListItem({
+      itemId: 999,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: "Record not found in the active owner scope.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
   it("rejects adding shopping-list items that reference archived products", async () => {
     mockDb.getFirstAsync.mockResolvedValueOnce({
       owner_id: 11,
@@ -746,6 +982,65 @@ describe("owner-scoped services", () => {
       expect.stringContaining("product.archived_at_ms IS NULL"),
       11,
     );
+  });
+
+  it("keeps owner snapshot shoppingList in sync after successful remove", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 901,
+      owner_id: 11,
+      product_id: 444,
+      quantity: 3,
+      unit_price_cents: 199,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync.mockResolvedValueOnce({
+      changes: 1,
+      lastInsertRowId: 0,
+    });
+    mockDb.getAllAsync.mockImplementation((query: string) => {
+      if (query.includes("SELECT 'purchase' AS kind")) {
+        return Promise.resolve([]);
+      }
+      if (query.includes("FROM shopping_list_item")) {
+        return Promise.resolve([]);
+      }
+      if (query.includes("FROM product")) {
+        return Promise.resolve([
+          {
+            id: 444,
+            owner_id: 11,
+            name: "Milk",
+            barcode: "A-1",
+            archived_at_ms: null,
+            created_at_ms: 100,
+            updated_at_ms: 100,
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const removeResult = await shoppingListService.removeShoppingListItem({
+      itemId: 901,
+    });
+    const listResult = await shoppingListService.listShoppingListItems();
+    const snapshotResult = await ownerDataService.getOwnerScopedSnapshot();
+
+    expect(removeResult).toEqual({
+      ok: true,
+      value: {
+        removedItemId: 901,
+      },
+    });
+    expect(listResult).toEqual({
+      ok: true,
+      value: [],
+    });
+    expect(snapshotResult.ok).toBe(true);
+    if (snapshotResult.ok) {
+      expect(snapshotResult.value.shoppingList).toEqual([]);
+    }
   });
 
   it("rejects payments when shopper belongs to a different owner", async () => {
@@ -858,6 +1153,17 @@ describe("owner-scoped services", () => {
     );
     expect(schema.CREATE_PRODUCT_OWNER_BARCODE_UNIQUE_INDEX_SQL).toContain(
       "owner_id, lower(barcode)",
+    );
+  });
+
+  it("keeps owner/product shopping-list uniqueness enforced at the DB index boundary", () => {
+    const schema = require("@/db/schema");
+
+    expect(schema.CREATE_SHOPPING_LIST_ITEM_OWNER_PRODUCT_UNIQUE_INDEX_SQL).toContain(
+      "CREATE UNIQUE INDEX",
+    );
+    expect(schema.CREATE_SHOPPING_LIST_ITEM_OWNER_PRODUCT_UNIQUE_INDEX_SQL).toContain(
+      "owner_id, product_id",
     );
   });
 

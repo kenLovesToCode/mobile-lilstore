@@ -50,10 +50,22 @@ export type UpdateShoppingListItemInput = {
   nowMs?: number;
 };
 
+export type RemoveShoppingListItemInput = {
+  itemId: number;
+};
+
+export type RemoveShoppingListItemResult = {
+  removedItemId: number;
+};
+
 const SHOPPING_LIST_INPUT_INVALID_MESSAGE =
   "Quantity must be a positive integer and unit price must be a non-negative integer.";
 const SHOPPING_LIST_ARCHIVED_PRODUCT_CONFLICT_MESSAGE =
   "Archived products cannot be used in active shopping-list entries. Select an active product.";
+const SHOPPING_LIST_DUPLICATE_PRODUCT_CONFLICT_MESSAGE =
+  "This product is already published in the shopping list for the active owner.";
+const SHOPPING_LIST_OWNER_PRODUCT_UNIQUE_INDEX_NAME =
+  "idx_shopping_list_item_owner_product_unique";
 
 function mapItem(row: ShoppingListItemRow): ShoppingListItem {
   return {
@@ -100,6 +112,27 @@ function validatePricing(
   }
 
   return null;
+}
+
+function mapAddConflictError(error: unknown): OwnerScopeResult<never> | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const message = error.message ?? "";
+  if (!/UNIQUE constraint failed/i.test(message)) {
+    return null;
+  }
+
+  const isDuplicateProductConstraint =
+    message.includes(SHOPPING_LIST_OWNER_PRODUCT_UNIQUE_INDEX_NAME) ||
+    /owner_id,\s*product_id/i.test(message);
+
+  if (isDuplicateProductConstraint) {
+    return conflictError(SHOPPING_LIST_DUPLICATE_PRODUCT_CONFLICT_MESSAGE);
+  }
+
+  return conflictError();
 }
 
 export async function addShoppingListItem(
@@ -169,6 +202,11 @@ export async function addShoppingListItem(
 
     return { ok: true, value: mapItem(created) };
   } catch (error: unknown) {
+    const mappedConflict = mapAddConflictError(error);
+    if (mappedConflict) {
+      return mappedConflict;
+    }
+
     console.warn("[shopping-list-service] addShoppingListItem failed", {
       reason: getSafeErrorReason(error),
     });
@@ -311,6 +349,76 @@ export async function updateShoppingListItem(
     return { ok: true, value: mapItem(updated) };
   } catch (error: unknown) {
     console.warn("[shopping-list-service] updateShoppingListItem failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function removeShoppingListItem(
+  input: RemoveShoppingListItemInput,
+): Promise<OwnerScopeResult<RemoveShoppingListItemResult>> {
+  const ownerContext = requireActiveOwnerContext();
+  if (!ownerContext.ok) {
+    return ownerContext;
+  }
+
+  await bootstrapDatabase();
+  const db = getDb();
+  const existing = await findItem(input.itemId);
+
+  if (!existing) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+      },
+    };
+  }
+
+  if (existing.owner_id !== ownerContext.value.id) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: OWNER_SCOPE_MISMATCH_MESSAGE,
+      },
+    };
+  }
+
+  try {
+    const deleteResult = await db.runAsync(
+      `DELETE FROM ${SHOPPING_LIST_ITEM_TABLE}
+       WHERE id = ? AND owner_id = ?;`,
+      input.itemId,
+      ownerContext.value.id,
+    );
+
+    if (deleteResult.changes < 1) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      value: {
+        removedItemId: input.itemId,
+      },
+    };
+  } catch (error: unknown) {
+    console.warn("[shopping-list-service] removeShoppingListItem failed", {
       reason: getSafeErrorReason(error),
     });
     return {

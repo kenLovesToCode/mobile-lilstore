@@ -141,6 +141,11 @@ CREATE INDEX IF NOT EXISTS idx_shopping_list_item_owner_created_at
 ON ${SHOPPING_LIST_ITEM_TABLE}(owner_id, created_at_ms DESC, id DESC);
 `;
 
+export const CREATE_SHOPPING_LIST_ITEM_OWNER_PRODUCT_UNIQUE_INDEX_SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shopping_list_item_owner_product_unique
+ON ${SHOPPING_LIST_ITEM_TABLE}(owner_id, product_id);
+`;
+
 export const CREATE_PURCHASE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS ${PURCHASE_TABLE} (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
