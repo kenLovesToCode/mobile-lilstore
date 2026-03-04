@@ -33,6 +33,8 @@ jest.mock("@/domain/services/auth-service", () => ({
 }));
 
 jest.mock("@/domain/services/entry-gate-runtime", () => ({
+  DEFAULT_GATE_ERROR_MESSAGE:
+    "We couldn't check local setup right now. Please retry.",
   resolveEntryRouteFromAdminCheck: (...args: unknown[]) =>
     mockResolveEntryRouteFromAdminCheck(...args),
   resolveCreateMasterAdminVisibility: (...args: unknown[]) =>
@@ -95,7 +97,35 @@ describe("Entry gate router integration", () => {
     });
   });
 
-  it("routes first-run users to create-master-admin screen", async () => {
+  it("renders home screen with Buy Now and Admin actions", async () => {
+    renderRouter(ROUTES, { initialUrl: "/" });
+
+    await waitFor(() => {
+      expect(screen.getByText("Buy Now")).toBeTruthy();
+      expect(screen.getByText("Admin")).toBeTruthy();
+    });
+    expect(screen).toHavePathname("/");
+    expect(mockResolveEntryRouteFromAdminCheck).not.toHaveBeenCalled();
+  });
+
+  it("shows safe message when admin route resolution throws", async () => {
+    mockResolveEntryRouteFromAdminCheck.mockRejectedValueOnce(
+      new Error("network dropped"),
+    );
+
+    renderRouter(ROUTES, { initialUrl: "/" });
+
+    fireEvent.press(screen.getByText("Admin"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("We couldn't check local setup right now. Please retry."),
+      ).toBeTruthy();
+      expect(screen).toHavePathname("/");
+    });
+  });
+
+  it("routes first-run admins from home to create-master-admin", async () => {
     mockResolveEntryRouteFromAdminCheck.mockResolvedValue({
       kind: "success",
       value: CREATE_MASTER_ADMIN_ROUTE,
@@ -104,13 +134,15 @@ describe("Entry gate router integration", () => {
 
     renderRouter(ROUTES, { initialUrl: "/" });
 
+    fireEvent.press(screen.getByText("Admin"));
+
     await waitFor(() => {
       expect(screen).toHavePathname(PUBLIC_CREATE_MASTER_ADMIN_ROUTE);
     });
     await expectResolverWiring(mockResolveEntryRouteFromAdminCheck, false);
   });
 
-  it("routes returning admins to login screen", async () => {
+  it("routes returning admins from home to login", async () => {
     mockHasAnyAdmin.mockResolvedValue(true);
     mockResolveEntryRouteFromAdminCheck.mockResolvedValue({
       kind: "success",
@@ -120,34 +152,12 @@ describe("Entry gate router integration", () => {
 
     renderRouter(ROUTES, { initialUrl: "/" });
 
+    fireEvent.press(screen.getByText("Admin"));
+
     await waitFor(() => {
       expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
     });
     await expectResolverWiring(mockResolveEntryRouteFromAdminCheck, true);
-  });
-
-  it("retries entry gate after a failure and navigates when retry succeeds", async () => {
-    mockResolveEntryRouteFromAdminCheck
-      .mockResolvedValueOnce({
-        kind: "error",
-        message: "We couldn't check local setup right now. Please retry.",
-        elapsedMs: 1900,
-      })
-      .mockResolvedValueOnce({
-        kind: "success",
-        value: ADMIN_LOGIN_ROUTE,
-        elapsedMs: 90,
-      });
-
-    renderRouter(ROUTES, { initialUrl: "/" });
-
-    await waitFor(() => {
-      expect(screen.getByText("Unable to load entry gate")).toBeTruthy();
-    });
-    fireEvent.press(screen.getByText("Retry"));
-    await waitFor(() => {
-      expect(screen).toHavePathname(PUBLIC_ADMIN_LOGIN_ROUTE);
-    });
   });
 
   it("redirects create-master-admin shell to login when admin already exists", async () => {

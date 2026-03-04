@@ -63,9 +63,9 @@ development_status:
   4-2-configure-optional-bundle-offers: done
   4-3-create-and-manage-assorted-shopping-list-groups: done
   4-4-admin-shopping-list-management-remains-responsive-at-scale: done
-  epic-4-retrospective: optional
-  epic-5: backlog
-  5-1-pin-entry-unlocks-shopper-session: backlog
+  epic-4-retrospective: done
+  epic-5: in-progress
+  5-1-pin-entry-unlocks-shopper-session: done
   5-2-scanner-ready-fast-not-available-blocking: backlog
   5-3-quantity-selection-with-guardrails-draft-cart: backlog
   5-4-cart-preview-and-editing-before-confirm: backlog
