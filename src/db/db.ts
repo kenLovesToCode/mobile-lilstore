@@ -24,7 +24,6 @@ import {
 } from "@/db/migrations/0008_shopping_list_assorted_groups";
 
 const DATABASE_NAME = "lilstore.db";
-const db = SQLite.openDatabaseSync(DATABASE_NAME);
 const SHOPPER_PIN_SALT_SECRET_KEY = "shopper_pin_salt_hex";
 const SHOPPER_PIN_MIGRATION_STATE_KEY = "shopper_pin_migration_v4_complete";
 
@@ -36,14 +35,47 @@ const BASE_MIGRATION_STATEMENTS = [
 ];
 
 let bootstrapPromise: Promise<void> | null = null;
+let database: SQLite.SQLiteDatabase | null = null;
+let databaseInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export function getDb() {
-  return db;
+  if (!database) {
+    throw new Error("Database is not initialized. Call bootstrapDatabase() first.");
+  }
+  return database;
+}
+
+async function initializeDatabase() {
+  if (database) {
+    return database;
+  }
+  if (!databaseInitPromise) {
+    databaseInitPromise = (async () => {
+      try {
+        database = SQLite.openDatabaseSync(DATABASE_NAME);
+      } catch (error) {
+        console.warn("[db] openDatabaseSync failed; falling back to async open.", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        database = await SQLite.openDatabaseAsync(DATABASE_NAME);
+      }
+      return database;
+    })();
+  }
+
+  try {
+    return await databaseInitPromise;
+  } catch (error) {
+    databaseInitPromise = null;
+    database = null;
+    throw error;
+  }
 }
 
 export async function bootstrapDatabase() {
   if (!bootstrapPromise) {
     bootstrapPromise = (async () => {
+      const db = await initializeDatabase();
       for (const statement of BASE_MIGRATION_STATEMENTS) {
         await db.execAsync(statement);
       }
@@ -87,17 +119,22 @@ export async function bootstrapDatabase() {
             await db.execAsync(statement);
           }
 
-          const nowMs = Date.now();
           await db.runAsync(
-            `INSERT INTO app_secret (key, value, created_at_ms, updated_at_ms)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(key) DO UPDATE
-             SET value = excluded.value,
-                 updated_at_ms = excluded.updated_at_ms;`,
+            `UPDATE app_secret
+             SET value = ?
+             WHERE key = ?;`,
+            "done",
+            SHOPPER_PIN_MIGRATION_STATE_KEY,
+          );
+          await db.runAsync(
+            `INSERT INTO app_secret (key, value)
+             SELECT ?, ?
+             WHERE NOT EXISTS (
+               SELECT 1 FROM app_secret WHERE key = ?
+             );`,
             SHOPPER_PIN_MIGRATION_STATE_KEY,
             "done",
-            nowMs,
-            nowMs,
+            SHOPPER_PIN_MIGRATION_STATE_KEY,
           );
           await db.execAsync("COMMIT;");
           didCommit = true;

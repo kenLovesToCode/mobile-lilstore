@@ -1098,6 +1098,114 @@ describe("owner-scoped services", () => {
     expect(mockDb.runAsync).not.toHaveBeenCalled();
   });
 
+  it("removes assorted shopping-list items in active owner scope", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 77,
+      owner_id: 11,
+      name: "Assorted",
+      quantity: 8,
+      unit_price_cents: 250,
+      bundle_qty: null,
+      bundle_price_cents: null,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync.mockResolvedValueOnce({
+      changes: 1,
+      lastInsertRowId: 0,
+    });
+
+    const result = await shoppingListService.removeAssortedShoppingListItem({
+      itemId: 77,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        removedItemId: 77,
+      },
+    });
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM shopping_list_assorted_item"),
+      77,
+      11,
+    );
+  });
+
+  it("returns not-found when assorted remove delete changes are zero after pre-check", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 77,
+      owner_id: 11,
+      name: "Assorted",
+      quantity: 8,
+      unit_price_cents: 250,
+      bundle_qty: null,
+      bundle_price_cents: null,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+    mockDb.runAsync.mockResolvedValueOnce({
+      changes: 0,
+      lastInsertRowId: 0,
+    });
+
+    const result = await shoppingListService.removeAssortedShoppingListItem({
+      itemId: 77,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: "Record not found in the active owner scope.",
+      },
+    });
+  });
+
+  it("rejects removing assorted shopping-list items from another owner scope", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 77,
+      owner_id: 99,
+      name: "Assorted",
+      quantity: 8,
+      unit_price_cents: 250,
+      bundle_qty: null,
+      bundle_price_cents: null,
+      created_at_ms: 100,
+      updated_at_ms: 100,
+    });
+
+    const result = await shoppingListService.removeAssortedShoppingListItem({
+      itemId: 77,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: "The requested record belongs to a different owner.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
+  it("rejects removing missing assorted shopping-list items with deterministic not-found mapping", async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce(null);
+
+    const result = await shoppingListService.removeAssortedShoppingListItem({
+      itemId: 77,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: "Record not found in the active owner scope.",
+      },
+    });
+    expect(mockDb.runAsync).not.toHaveBeenCalled();
+  });
+
   it("rejects adding shopping-list items that reference archived products", async () => {
     mockDb.getFirstAsync.mockResolvedValueOnce({
       owner_id: 11,

@@ -1,6 +1,15 @@
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  SectionList,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
@@ -12,6 +21,7 @@ import {
   createAssortedShoppingListItem,
   listProducts,
   listShoppingListItems,
+  removeAssortedShoppingListItem,
   removeShoppingListItem,
   updateAssortedShoppingListItem,
   updateShoppingListItem,
@@ -68,12 +78,89 @@ type ShoppingListSection = {
   data: ShoppingListSectionRow[];
 };
 
+type ProductSectionRowProps = {
+  product: ProductListItem;
+  isSelected: boolean;
+  onSelect: (productId: number) => void;
+};
+
+type StandardShoppingItemRowProps = {
+  item: StandardShoppingListRow;
+  isSelected: boolean;
+  productName: string;
+  onSelect: (item: StandardShoppingListRow) => void;
+};
+
+type AssortedShoppingItemRowProps = {
+  item: AssortedShoppingListRow;
+  isSelected: boolean;
+  onSelect: (item: AssortedShoppingListRow) => void;
+};
+
+type MemberChipProps = {
+  productId: number;
+  label: string;
+  selected: boolean;
+  accessibilityLabel: string;
+  disabled?: boolean;
+  onToggle: (productId: number) => void;
+};
+
 const SHOPPING_LIST_FORM_INVALID_MESSAGE =
   "Select a product, set a non-negative unit price, set quantity above zero, and provide both bundle fields together when using bundle offers.";
 const ASSORTED_FORM_INVALID_MESSAGE =
   "Assorted entry requires a name, at least two unique member products, non-negative unit price, positive quantity, and valid optional bundle fields.";
 const REMOVE_CONFIRM_MESSAGE =
-  "Press Remove Shopping List Item again to confirm.";
+  "Press Remove Selected Shopping List Item again to confirm.";
+const PERF_LOG_PREFIX = "[shopping-list-perf]";
+const PERF_SCROLL_FRAME_GAP_JANK_MS = 24;
+const PERF_LOGGING_ENABLED = process.env.EXPO_PUBLIC_SHOPPING_LIST_PERF === "1";
+const PERF_PROFILE_LABEL = process.env.EXPO_PUBLIC_SHOPPING_LIST_PERF_LABEL?.trim() || null;
+
+type SelectionMetricTarget = "product" | "standard" | "assorted";
+
+type PendingSelectionMetric = {
+  target: SelectionMetricTarget;
+  id: number;
+  startedAtMs: number;
+};
+
+type ActiveScrollLoopMetric = {
+  startedAtMs: number;
+  lastEventAtMs: number;
+  eventCount: number;
+  jankEventCount: number;
+  maxGapMs: number;
+  startedBy: "drag" | "momentum";
+};
+
+function getNowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function toMetricMs(value: number) {
+  return Number(value.toFixed(2));
+}
+
+function logPerfMetric(
+  metric: string,
+  payload: Record<string, number | string | boolean | null>,
+) {
+  if (!PERF_LOGGING_ENABLED) {
+    return;
+  }
+  console.log(
+    `${PERF_LOG_PREFIX} ${JSON.stringify({
+      metric,
+      timestamp: new Date().toISOString(),
+      profileLabel: PERF_PROFILE_LABEL,
+      ...payload,
+    })}`,
+  );
+}
 
 function parseIntegerInput(value: string): number | null {
   const normalized = value.trim();
@@ -143,6 +230,10 @@ function toggleMember(memberIds: number[], memberId: number) {
   return [...memberIds, memberId];
 }
 
+function normalizeSearchInput(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function mapStandardShoppingRow(item: {
   id: number;
   productId: number;
@@ -193,6 +284,99 @@ function mapAssortedShoppingRow(item: {
   };
 }
 
+const ProductSectionRow = React.memo(function ProductSectionRow({
+  product,
+  isSelected,
+  onSelect,
+}: ProductSectionRowProps) {
+  return (
+    <Pressable
+      accessibilityLabel={`Select Product ${product.name}`}
+      accessibilityRole="button"
+      onPress={() => onSelect(product.id)}
+      style={({ pressed }) => [
+        styles.listItem,
+        isSelected && styles.listItemSelected,
+        pressed && styles.listItemPressed,
+      ]}
+    >
+      <Text style={styles.listItemName}>{product.name}</Text>
+      <Text style={styles.listItemMeta}>{product.barcode}</Text>
+    </Pressable>
+  );
+});
+
+const StandardShoppingItemRow = React.memo(function StandardShoppingItemRow({
+  item,
+  isSelected,
+  productName,
+  onSelect,
+}: StandardShoppingItemRowProps) {
+  return (
+    <Pressable
+      accessibilityLabel={`Edit Shopping List Item #${item.id}`}
+      accessibilityRole="button"
+      onPress={() => onSelect(item)}
+      style={({ pressed }) => [
+        styles.listItem,
+        isSelected && styles.listItemSelected,
+        pressed && styles.listItemPressed,
+      ]}
+    >
+      <Text style={styles.listItemName}>{productName}</Text>
+      <Text style={styles.listItemMeta}>{formatShoppingListMeta(item)}</Text>
+    </Pressable>
+  );
+});
+
+const AssortedShoppingItemRow = React.memo(function AssortedShoppingItemRow({
+  item,
+  isSelected,
+  onSelect,
+}: AssortedShoppingItemRowProps) {
+  return (
+    <Pressable
+      accessibilityLabel={`Edit Assorted Shopping List Item #${item.id}`}
+      accessibilityRole="button"
+      onPress={() => onSelect(item)}
+      style={({ pressed }) => [
+        styles.listItem,
+        isSelected && styles.listItemSelected,
+        pressed && styles.listItemPressed,
+      ]}
+    >
+      <Text style={styles.listItemName}>{`${item.name} · ${item.memberCount} members`}</Text>
+      <Text style={styles.listItemMeta}>{formatAssortedMeta(item)}</Text>
+    </Pressable>
+  );
+});
+
+const MemberChip = React.memo(function MemberChip({
+  productId,
+  label,
+  selected,
+  accessibilityLabel,
+  disabled,
+  onToggle,
+}: MemberChipProps) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={() => onToggle(productId)}
+      style={({ pressed }) => [
+        styles.memberChip,
+        selected && styles.memberChipSelected,
+        disabled && styles.buttonDisabled,
+        pressed && styles.buttonPressed,
+      ]}
+    >
+      <Text style={styles.memberChipLabel}>{label}</Text>
+    </Pressable>
+  );
+});
+
 export default function ShoppingListScreen() {
   const activeOwner = useSyncExternalStore(
     subscribeToAdminSession,
@@ -227,6 +411,8 @@ export default function ShoppingListScreen() {
   const [editAssortedBundleQty, setEditAssortedBundleQty] = useState("");
   const [editAssortedBundlePrice, setEditAssortedBundlePrice] = useState("");
   const [editAssortedMemberIds, setEditAssortedMemberIds] = useState<number[]>([]);
+  const [productSearchQuery, setProductSearchQuery] = useState("");
+  const [shoppingSearchQuery, setShoppingSearchQuery] = useState("");
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -235,7 +421,9 @@ export default function ShoppingListScreen() {
   const [isCreatingAssorted, setIsCreatingAssorted] = useState(false);
   const [isUpdatingAssorted, setIsUpdatingAssorted] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
-  const [removeConfirmItemId, setRemoveConfirmItemId] = useState<number | null>(null);
+  const [removeConfirmSelectionKey, setRemoveConfirmSelectionKey] = useState<string | null>(
+    null,
+  );
   const submitLockRef = useRef<
     "create" | "update" | "remove" | "create-assorted" | "update-assorted" | null
   >(null);
@@ -245,6 +433,8 @@ export default function ShoppingListScreen() {
   const selectedStandardItemIdRef = useRef<number | null>(null);
   const selectedAssortedItemIdRef = useRef<number | null>(null);
   const lastOwnerIdRef = useRef<number | null>(null);
+  const pendingSelectionMetricRef = useRef<PendingSelectionMetric | null>(null);
+  const activeScrollLoopMetricRef = useRef<ActiveScrollLoopMetric | null>(null);
 
   useEffect(() => {
     ownerContextVersionRef.current += 1;
@@ -261,6 +451,40 @@ export default function ShoppingListScreen() {
   useEffect(() => {
     selectedAssortedItemIdRef.current = selectedAssortedItemId;
   }, [selectedAssortedItemId]);
+
+  const startSelectionMetric = useCallback((target: SelectionMetricTarget, id: number) => {
+    if (!PERF_LOGGING_ENABLED) {
+      return;
+    }
+    pendingSelectionMetricRef.current = {
+      target,
+      id,
+      startedAtMs: getNowMs(),
+    };
+  }, []);
+
+  useEffect(() => {
+    const pendingMetric = pendingSelectionMetricRef.current;
+    if (!pendingMetric) {
+      return;
+    }
+
+    const isCompleted =
+      (pendingMetric.target === "product" && selectedProductId === pendingMetric.id) ||
+      (pendingMetric.target === "standard" && selectedStandardItemId === pendingMetric.id) ||
+      (pendingMetric.target === "assorted" && selectedAssortedItemId === pendingMetric.id);
+    if (!isCompleted) {
+      return;
+    }
+
+    logPerfMetric("select_latency", {
+      target: pendingMetric.target,
+      selectedId: pendingMetric.id,
+      durationMs: toMetricMs(getNowMs() - pendingMetric.startedAtMs),
+      ownerId: activeOwnerId,
+    });
+    pendingSelectionMetricRef.current = null;
+  }, [activeOwnerId, selectedAssortedItemId, selectedProductId, selectedStandardItemId]);
 
   const productsById = useMemo(() => {
     const map = new Map<number, ProductListItem>();
@@ -292,6 +516,51 @@ export default function ShoppingListScreen() {
     () => products.find((product) => product.id === selectedProductId) ?? null,
     [products, selectedProductId],
   );
+
+  const normalizedProductSearchQuery = useMemo(
+    () => normalizeSearchInput(productSearchQuery),
+    [productSearchQuery],
+  );
+  const normalizedShoppingSearchQuery = useMemo(
+    () => normalizeSearchInput(shoppingSearchQuery),
+    [shoppingSearchQuery],
+  );
+
+  const filteredProducts = useMemo(() => {
+    if (normalizedProductSearchQuery.length === 0) {
+      return products;
+    }
+
+    return products.filter((product) =>
+      `${product.name} ${product.barcode}`
+        .toLowerCase()
+        .includes(normalizedProductSearchQuery),
+    );
+  }, [normalizedProductSearchQuery, products]);
+
+  const filteredShoppingList = useMemo(() => {
+    if (normalizedShoppingSearchQuery.length === 0) {
+      return shoppingList;
+    }
+
+    return shoppingList.filter((item) => {
+      if (item.itemType === "standard") {
+        const product = productsById.get(item.productId);
+        const searchValue = `${product?.name ?? `Product #${item.productId}`} ${
+          product?.barcode ?? ""
+        } ${formatShoppingListMeta(item)}`.toLowerCase();
+        return searchValue.includes(normalizedShoppingSearchQuery);
+      }
+
+      const memberNames = item.memberProductIds
+        .map((memberId) => productsById.get(memberId)?.name ?? `Product #${memberId}`)
+        .join(" ");
+      const searchValue = `${item.name} ${memberNames} members ${item.memberCount} ${formatAssortedMeta(
+        item,
+      )}`.toLowerCase();
+      return searchValue.includes(normalizedShoppingSearchQuery);
+    });
+  }, [normalizedShoppingSearchQuery, productsById, shoppingList]);
 
   const refreshData = useCallback(async () => {
     if (activeOwnerId == null) {
@@ -400,7 +669,7 @@ export default function ShoppingListScreen() {
         )
       ) {
         setSelectedStandardItemId(null);
-        setRemoveConfirmItemId(null);
+        setRemoveConfirmSelectionKey(null);
         setEditUnitPrice("");
         setEditQuantity("");
         setEditBundleQty("");
@@ -467,6 +736,8 @@ export default function ShoppingListScreen() {
       setEditAssortedBundleQty("");
       setEditAssortedBundlePrice("");
       setEditAssortedMemberIds([]);
+      setProductSearchQuery("");
+      setShoppingSearchQuery("");
       setErrorMessage(null);
       setIsRefreshing(false);
       setIsCreating(false);
@@ -474,7 +745,7 @@ export default function ShoppingListScreen() {
       setIsCreatingAssorted(false);
       setIsUpdatingAssorted(false);
       setIsRemoving(false);
-      setRemoveConfirmItemId(null);
+      setRemoveConfirmSelectionKey(null);
       lastOwnerIdRef.current = null;
       return;
     }
@@ -505,7 +776,9 @@ export default function ShoppingListScreen() {
       setEditAssortedBundleQty("");
       setEditAssortedBundlePrice("");
       setEditAssortedMemberIds([]);
-      setRemoveConfirmItemId(null);
+      setProductSearchQuery("");
+      setShoppingSearchQuery("");
+      setRemoveConfirmSelectionKey(null);
       setErrorMessage(null);
       lastOwnerIdRef.current = activeOwnerId;
     }
@@ -513,12 +786,14 @@ export default function ShoppingListScreen() {
     void refreshData();
   }, [activeOwnerId, refreshData]);
 
-  function onSelectProduct(productId: number) {
+  const onSelectProduct = useCallback((productId: number) => {
+    startSelectionMetric("product", productId);
     setSelectedProductId(productId);
     setErrorMessage(null);
-  }
+  }, [startSelectionMetric]);
 
-  function onSelectStandardItem(item: StandardShoppingListRow) {
+  const onSelectStandardItem = useCallback((item: StandardShoppingListRow) => {
+    startSelectionMetric("standard", item.id);
     setSelectedStandardItemId(item.id);
     setSelectedAssortedItemId(null);
     setSelectedProductId(item.productId);
@@ -526,14 +801,15 @@ export default function ShoppingListScreen() {
     setEditQuantity(String(item.quantity));
     setEditBundleQty(item.bundleQty == null ? "" : String(item.bundleQty));
     setEditBundlePrice(item.bundlePriceCents == null ? "" : String(item.bundlePriceCents));
-    setRemoveConfirmItemId(null);
+    setRemoveConfirmSelectionKey(null);
     setErrorMessage(null);
-  }
+  }, [startSelectionMetric]);
 
-  function onSelectAssortedItem(item: AssortedShoppingListRow) {
+  const onSelectAssortedItem = useCallback((item: AssortedShoppingListRow) => {
+    startSelectionMetric("assorted", item.id);
     setSelectedAssortedItemId(item.id);
     setSelectedStandardItemId(null);
-    setRemoveConfirmItemId(null);
+    setRemoveConfirmSelectionKey(null);
     setEditAssortedName(item.name);
     setEditAssortedUnitPrice(String(item.unitPriceCents));
     setEditAssortedQuantity(String(item.quantity));
@@ -543,7 +819,115 @@ export default function ShoppingListScreen() {
     );
     setEditAssortedMemberIds([...item.memberProductIds]);
     setErrorMessage(null);
-  }
+  }, [startSelectionMetric]);
+
+  const clearProductSearch = useCallback(() => {
+    setProductSearchQuery("");
+  }, []);
+
+  const clearShoppingSearch = useCallback(() => {
+    setShoppingSearchQuery("");
+  }, []);
+
+  const toggleCreateAssortedMember = useCallback((productId: number) => {
+    setCreateAssortedMemberIds((current) => toggleMember(current, productId));
+    setErrorMessage(null);
+  }, []);
+
+  const toggleEditAssortedMember = useCallback(
+    (productId: number) => {
+      if (selectedAssortedItemId == null) {
+        return;
+      }
+      setEditAssortedMemberIds((current) => toggleMember(current, productId));
+      setErrorMessage(null);
+    },
+    [selectedAssortedItemId],
+  );
+
+  const beginScrollLoopMetric = useCallback((startedBy: "drag" | "momentum") => {
+    if (!PERF_LOGGING_ENABLED) {
+      return;
+    }
+    const nowMs = getNowMs();
+    activeScrollLoopMetricRef.current = {
+      startedAtMs: nowMs,
+      lastEventAtMs: nowMs,
+      eventCount: 0,
+      jankEventCount: 0,
+      maxGapMs: 0,
+      startedBy,
+    };
+  }, []);
+
+  const completeScrollLoopMetric = useCallback(
+    (endedBy: "drag-end" | "momentum-end") => {
+      if (!PERF_LOGGING_ENABLED) {
+        return;
+      }
+      const activeMetric = activeScrollLoopMetricRef.current;
+      if (!activeMetric) {
+        return;
+      }
+      const durationMs = getNowMs() - activeMetric.startedAtMs;
+      logPerfMetric("scroll_loop", {
+        startedBy: activeMetric.startedBy,
+        endedBy,
+        ownerId: activeOwnerId,
+        durationMs: toMetricMs(durationMs),
+        eventCount: activeMetric.eventCount,
+        jankEventCount: activeMetric.jankEventCount,
+        maxGapMs: toMetricMs(activeMetric.maxGapMs),
+      });
+      activeScrollLoopMetricRef.current = null;
+    },
+    [activeOwnerId],
+  );
+
+  const onScroll = useCallback((_event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!PERF_LOGGING_ENABLED) {
+      return;
+    }
+    const activeMetric = activeScrollLoopMetricRef.current;
+    if (!activeMetric) {
+      return;
+    }
+
+    const nowMs = getNowMs();
+    const gapMs = nowMs - activeMetric.lastEventAtMs;
+    if (activeMetric.eventCount > 0) {
+      activeMetric.maxGapMs = Math.max(activeMetric.maxGapMs, gapMs);
+      if (gapMs >= PERF_SCROLL_FRAME_GAP_JANK_MS) {
+        activeMetric.jankEventCount += 1;
+      }
+    }
+    activeMetric.lastEventAtMs = nowMs;
+    activeMetric.eventCount += 1;
+  }, []);
+
+  const onScrollBeginDrag = useCallback(() => {
+    beginScrollLoopMetric("drag");
+  }, [beginScrollLoopMetric]);
+
+  const onMomentumScrollBegin = useCallback(() => {
+    if (activeScrollLoopMetricRef.current == null) {
+      beginScrollLoopMetric("momentum");
+    }
+  }, [beginScrollLoopMetric]);
+
+  const onScrollEndDrag = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const velocityY = Math.abs(event.nativeEvent.velocity?.y ?? 0);
+      if (velocityY < 0.05) {
+        completeScrollLoopMetric("drag-end");
+      }
+    },
+    [completeScrollLoopMetric],
+  );
+
+  const onMomentumScrollEnd = useCallback(() => {
+    completeScrollLoopMetric("momentum-end");
+  }, [completeScrollLoopMetric]);
 
   async function onCreateItem() {
     if (
@@ -648,11 +1032,13 @@ export default function ShoppingListScreen() {
     }
 
     submitLockRef.current = "update";
+    const updatedItemId = selectedStandardItem.id;
+    const updateStartedAtMs = getNowMs();
     const ownerContextVersion = ownerContextVersionRef.current;
     setIsUpdating(true);
     try {
       const result = await updateShoppingListItem({
-        itemId: selectedStandardItem.id,
+        itemId: updatedItemId,
         unitPriceCents,
         quantity,
         bundleQty: bundleInputs.bundleQty,
@@ -673,8 +1059,14 @@ export default function ShoppingListScreen() {
       setEditBundlePrice(
         result.value.bundlePriceCents == null ? "" : String(result.value.bundlePriceCents),
       );
-      setRemoveConfirmItemId(null);
+      setRemoveConfirmSelectionKey(null);
       await refreshData();
+      logPerfMetric("edit_save_latency", {
+        target: "standard",
+        itemId: updatedItemId,
+        ownerId: activeOwnerId,
+        durationMs: toMetricMs(getNowMs() - updateStartedAtMs),
+      });
     } catch {
       if (ownerContextVersion !== ownerContextVersionRef.current) {
         return;
@@ -805,11 +1197,13 @@ export default function ShoppingListScreen() {
     }
 
     submitLockRef.current = "update-assorted";
+    const updatedItemId = selectedAssortedItem.id;
+    const updateStartedAtMs = getNowMs();
     const ownerContextVersion = ownerContextVersionRef.current;
     setIsUpdatingAssorted(true);
     try {
       const result = await updateAssortedShoppingListItem({
-        itemId: selectedAssortedItem.id,
+        itemId: updatedItemId,
         name: normalizedName,
         quantity,
         unitPriceCents,
@@ -839,6 +1233,12 @@ export default function ShoppingListScreen() {
       );
       setEditAssortedMemberIds([...result.value.memberProductIds]);
       await refreshData();
+      logPerfMetric("edit_save_latency", {
+        target: "assorted",
+        itemId: updatedItemId,
+        ownerId: activeOwnerId,
+        durationMs: toMetricMs(getNowMs() - updateStartedAtMs),
+      });
     } catch {
       if (ownerContextVersion !== ownerContextVersionRef.current) {
         return;
@@ -853,9 +1253,10 @@ export default function ShoppingListScreen() {
   }
 
   async function onRemoveItem() {
+    const selectedItemForRemoval = selectedStandardItem ?? selectedAssortedItem;
     if (
       !activeOwner ||
-      !selectedStandardItem ||
+      !selectedItemForRemoval ||
       isCreating ||
       isUpdating ||
       isCreatingAssorted ||
@@ -866,8 +1267,9 @@ export default function ShoppingListScreen() {
       return;
     }
 
-    if (removeConfirmItemId !== selectedStandardItem.id) {
-      setRemoveConfirmItemId(selectedStandardItem.id);
+    const removeSelectionKey = `${selectedItemForRemoval.itemType}:${selectedItemForRemoval.id}`;
+    if (removeConfirmSelectionKey !== removeSelectionKey) {
+      setRemoveConfirmSelectionKey(removeSelectionKey);
       setErrorMessage(null);
       return;
     }
@@ -876,31 +1278,46 @@ export default function ShoppingListScreen() {
     const ownerContextVersion = ownerContextVersionRef.current;
     setIsRemoving(true);
     try {
-      const result = await removeShoppingListItem({
-        itemId: selectedStandardItem.id,
-      });
+      const result =
+        selectedItemForRemoval.itemType === "standard"
+          ? await removeShoppingListItem({
+              itemId: selectedItemForRemoval.id,
+            })
+          : await removeAssortedShoppingListItem({
+              itemId: selectedItemForRemoval.id,
+            });
       if (ownerContextVersion !== ownerContextVersionRef.current) {
         return;
       }
 
       if (!result.ok) {
-        setRemoveConfirmItemId(null);
+        setRemoveConfirmSelectionKey(null);
         setErrorMessage(result.error.message);
         return;
       }
 
-      setRemoveConfirmItemId(null);
-      setSelectedStandardItemId(null);
-      setEditUnitPrice("");
-      setEditQuantity("");
-      setEditBundleQty("");
-      setEditBundlePrice("");
+      setRemoveConfirmSelectionKey(null);
+      if (selectedItemForRemoval.itemType === "standard") {
+        setSelectedStandardItemId(null);
+        setEditUnitPrice("");
+        setEditQuantity("");
+        setEditBundleQty("");
+        setEditBundlePrice("");
+      } else {
+        setSelectedAssortedItemId(null);
+        setEditAssortedName("");
+        setEditAssortedQuantity("");
+        setEditAssortedUnitPrice("");
+        setEditAssortedBundleQty("");
+        setEditAssortedBundlePrice("");
+        setEditAssortedMemberIds([]);
+      }
       await refreshData();
     } catch {
       if (ownerContextVersion !== ownerContextVersionRef.current) {
         return;
       }
-      setRemoveConfirmItemId(null);
+      setRemoveConfirmSelectionKey(null);
       setErrorMessage("Unable to remove shopping-list item right now. Please try again.");
     } finally {
       if (submitLockRef.current === "remove") {
@@ -916,120 +1333,169 @@ export default function ShoppingListScreen() {
   const shoppingListEmptyMessage = !activeOwner
     ? "Shopping list is unavailable until an owner is selected."
     : "No published shopping-list items yet.";
+  const filteredProductEmptyMessage =
+    normalizedProductSearchQuery.length > 0
+      ? "No active products match your search."
+      : productEmptyMessage;
+  const filteredShoppingListEmptyMessage =
+    normalizedShoppingSearchQuery.length > 0
+      ? "No shopping-list entries match your search."
+      : shoppingListEmptyMessage;
   const isAnySubmitBusy =
     isCreating || isUpdating || isCreatingAssorted || isUpdatingAssorted || isRemoving;
   const createButtonDisabled = !activeOwner || !selectedProduct || isAnySubmitBusy;
   const updateButtonDisabled = !activeOwner || !selectedStandardItem || isAnySubmitBusy;
   const createAssortedButtonDisabled = !activeOwner || isAnySubmitBusy;
   const updateAssortedButtonDisabled = !activeOwner || !selectedAssortedItem || isAnySubmitBusy;
-  const removeButtonDisabled = !activeOwner || !selectedStandardItem || isAnySubmitBusy;
+  const selectedItemForRemoval = selectedStandardItem ?? selectedAssortedItem;
+  const removeButtonDisabled = !activeOwner || !selectedItemForRemoval || isAnySubmitBusy;
+  const selectedRemoveItemType = selectedItemForRemoval?.itemType ?? null;
+  const activeRemoveSelectionKey = selectedItemForRemoval
+    ? `${selectedItemForRemoval.itemType}:${selectedItemForRemoval.id}`
+    : null;
+  const isRemoveConfirmArmed =
+    activeRemoveSelectionKey != null && removeConfirmSelectionKey === activeRemoveSelectionKey;
+  const removeButtonLabel =
+    selectedRemoveItemType === "assorted"
+      ? "Remove Assorted Shopping List Item"
+      : "Remove Shopping List Item";
+  const confirmRemoveButtonLabel =
+    selectedRemoveItemType === "assorted"
+      ? "Confirm Remove Assorted Shopping List Item"
+      : "Confirm Remove Shopping List Item";
+  const showProductSearchClear = productSearchQuery.length > 0;
+  const showShoppingSearchClear = shoppingSearchQuery.length > 0;
+
   const sections = useMemo<ShoppingListSection[]>(
     () => [
       {
         key: "products",
         title: "Active Products",
-        emptyMessage: productEmptyMessage,
-        data: products.map((product) => ({ kind: "product", product })),
+        emptyMessage: filteredProductEmptyMessage,
+        data: filteredProducts.map((product) => ({ kind: "product", product })),
       },
       {
         key: "shopping",
         title: "Published Shopping List",
-        emptyMessage: shoppingListEmptyMessage,
-        data: shoppingList.map((item) => ({ kind: "shopping-item", item })),
+        emptyMessage: filteredShoppingListEmptyMessage,
+        data: filteredShoppingList.map((item) => ({ kind: "shopping-item", item })),
       },
     ],
-    [productEmptyMessage, products, shoppingList, shoppingListEmptyMessage],
+    [
+      filteredProductEmptyMessage,
+      filteredProducts,
+      filteredShoppingList,
+      filteredShoppingListEmptyMessage,
+    ],
+  );
+
+  const keyExtractor = useCallback((item: ShoppingListSectionRow) => {
+    return item.kind === "product"
+      ? `product-${item.product.id}`
+      : `${item.item.itemType}-${item.item.id}`;
+  }, []);
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: ShoppingListSection }) => (
+      <Text style={styles.sectionTitle}>{section.title}</Text>
+    ),
+    [],
+  );
+
+  const renderSectionFooter = useCallback(
+    ({ section }: { section: ShoppingListSection }) =>
+      section.data.length === 0 ? (
+        <Text style={styles.helperText}>{section.emptyMessage}</Text>
+      ) : null,
+    [],
+  );
+
+  const renderItemSeparator = useCallback(() => <View style={styles.listItemSpacer} />, []);
+
+  const renderItem = useCallback(
+    ({ item }: { item: ShoppingListSectionRow }) => {
+      if (item.kind === "product") {
+        return (
+          <ProductSectionRow
+            product={item.product}
+            isSelected={selectedProductId === item.product.id}
+            onSelect={onSelectProduct}
+          />
+        );
+      }
+
+      if (item.item.itemType === "standard") {
+        const productName =
+          productsById.get(item.item.productId)?.name ?? `Product #${item.item.productId}`;
+        return (
+          <StandardShoppingItemRow
+            item={item.item}
+            isSelected={selectedStandardItemId === item.item.id}
+            productName={productName}
+            onSelect={onSelectStandardItem}
+          />
+        );
+      }
+
+      return (
+        <AssortedShoppingItemRow
+          item={item.item}
+          isSelected={selectedAssortedItemId === item.item.id}
+          onSelect={onSelectAssortedItem}
+        />
+      );
+    },
+    [
+      onSelectAssortedItem,
+      onSelectProduct,
+      onSelectStandardItem,
+      productsById,
+      selectedAssortedItemId,
+      selectedProductId,
+      selectedStandardItemId,
+    ],
   );
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.content}>
         <SectionList<ShoppingListSectionRow, ShoppingListSection>
+          testID="shopping-list-sections"
           sections={sections}
+          initialNumToRender={16}
+          maxToRenderPerBatch={20}
+          windowSize={11}
+          updateCellsBatchingPeriod={40}
+          removeClippedSubviews
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
           contentContainerStyle={[styles.card, styles.sectionListContent]}
-          keyExtractor={(item) =>
-            item.kind === "product"
-              ? `product-${item.product.id}`
-              : `${item.item.itemType}-${item.item.id}`
-          }
-          renderSectionHeader={({ section }) => (
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-          )}
-          renderSectionFooter={({ section }) =>
-            section.data.length === 0 ? (
-              <Text style={styles.helperText}>{section.emptyMessage}</Text>
-            ) : null
-          }
-          ItemSeparatorComponent={() => <View style={styles.listItemSpacer} />}
-          renderItem={({ item }) => {
-            if (item.kind === "product") {
-              const isSelected = selectedProductId === item.product.id;
-              return (
-                <Pressable
-                  accessibilityLabel={`Select Product ${item.product.name}`}
-                  accessibilityRole="button"
-                  onPress={() => onSelectProduct(item.product.id)}
-                  style={({ pressed }) => [
-                    styles.listItem,
-                    isSelected && styles.listItemSelected,
-                    pressed && styles.listItemPressed,
-                  ]}
-                >
-                  <Text style={styles.listItemName}>{item.product.name}</Text>
-                  <Text style={styles.listItemMeta}>{item.product.barcode}</Text>
-                </Pressable>
-              );
-            }
-
-            if (item.item.itemType === "standard") {
-              const standardItem = item.item;
-              const isSelected = selectedStandardItemId === standardItem.id;
-              const productName =
-                productsById.get(standardItem.productId)?.name ??
-                `Product #${standardItem.productId}`;
-              return (
-                <Pressable
-                  accessibilityLabel={`Edit Shopping List Item #${standardItem.id}`}
-                  accessibilityRole="button"
-                  onPress={() => onSelectStandardItem(standardItem)}
-                  style={({ pressed }) => [
-                    styles.listItem,
-                    isSelected && styles.listItemSelected,
-                    pressed && styles.listItemPressed,
-                  ]}
-                >
-                  <Text style={styles.listItemName}>{productName}</Text>
-                  <Text style={styles.listItemMeta}>{formatShoppingListMeta(standardItem)}</Text>
-                </Pressable>
-              );
-            }
-
-            const assortedItem = item.item;
-            const isSelected = selectedAssortedItemId === assortedItem.id;
-            return (
-              <Pressable
-                accessibilityLabel={`Edit Assorted Shopping List Item #${assortedItem.id}`}
-                accessibilityRole="button"
-                onPress={() => onSelectAssortedItem(assortedItem)}
-                style={({ pressed }) => [
-                  styles.listItem,
-                  isSelected && styles.listItemSelected,
-                  pressed && styles.listItemPressed,
-                ]}
-              >
-                <Text style={styles.listItemName}>{`${assortedItem.name} · ${assortedItem.memberCount} members`}</Text>
-                <Text style={styles.listItemMeta}>{formatAssortedMeta(assortedItem)}</Text>
-              </Pressable>
-            );
-          }}
+          keyExtractor={keyExtractor}
+          renderSectionHeader={renderSectionHeader}
+          renderSectionFooter={renderSectionFooter}
+          ItemSeparatorComponent={renderItemSeparator}
+          renderItem={renderItem}
+          onScroll={onScroll}
+          onScrollBeginDrag={onScrollBeginDrag}
+          onScrollEndDrag={onScrollEndDrag}
+          onMomentumScrollBegin={onMomentumScrollBegin}
+          onMomentumScrollEnd={onMomentumScrollEnd}
           ListHeaderComponent={
             <View>
               <Text style={styles.title}>Shopping List Management</Text>
               <Text style={styles.subtitle}>
                 Active owner: {activeOwner?.name ?? "None selected"}
               </Text>
+              <Text style={styles.helperText}>
+                Showing {filteredProducts.length}/{products.length} products ·{" "}
+                {filteredShoppingList.length}/{shoppingList.length} published rows
+              </Text>
+              {PERF_LOGGING_ENABLED ? (
+                <Text style={styles.helperText}>
+                  Perf logging enabled ({PERF_LOG_PREFIX})
+                </Text>
+              ) : null}
 
               {!activeOwner ? (
                 <Text style={styles.guardText}>{productEmptyMessage}</Text>
@@ -1038,6 +1504,48 @@ export default function ShoppingListScreen() {
               {isRefreshing ? (
                 <Text style={styles.helperText}>Refreshing shopping list...</Text>
               ) : null}
+
+              <TextInput
+                accessibilityLabel="Search Active Products"
+                style={styles.input}
+                placeholder="Search products by name or barcode"
+                value={productSearchQuery}
+                onChangeText={setProductSearchQuery}
+              />
+              <Pressable
+                accessibilityLabel="Search Active Products Clear"
+                accessibilityRole="button"
+                disabled={!showProductSearchClear}
+                onPress={clearProductSearch}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && showProductSearchClear && styles.buttonPressed,
+                  !showProductSearchClear && styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.secondaryButtonLabel}>Clear Product Search</Text>
+              </Pressable>
+
+              <TextInput
+                accessibilityLabel="Search Published Shopping List"
+                style={styles.input}
+                placeholder="Search shopping rows by product, barcode, or metadata"
+                value={shoppingSearchQuery}
+                onChangeText={setShoppingSearchQuery}
+              />
+              <Pressable
+                accessibilityLabel="Search Published Shopping List Clear"
+                accessibilityRole="button"
+                disabled={!showShoppingSearchClear}
+                onPress={clearShoppingSearch}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && showShoppingSearchClear && styles.buttonPressed,
+                  !showShoppingSearchClear && styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.secondaryButtonLabel}>Clear Shopping Search</Text>
+              </Pressable>
 
               <Pressable
                 accessibilityLabel="Refresh Shopping List"
@@ -1181,12 +1689,12 @@ export default function ShoppingListScreen() {
                 <Text style={styles.dangerButtonLabel}>
                   {isRemoving
                     ? "Removing..."
-                    : removeConfirmItemId === selectedStandardItem?.id
-                      ? "Confirm Remove Shopping List Item"
-                      : "Remove Shopping List Item"}
+                    : isRemoveConfirmArmed
+                      ? confirmRemoveButtonLabel
+                      : removeButtonLabel}
                 </Text>
               </Pressable>
-              {removeConfirmItemId === selectedStandardItem?.id ? (
+              {isRemoveConfirmArmed ? (
                 <Text style={styles.warningText}>{REMOVE_CONFIRM_MESSAGE}</Text>
               ) : null}
 
@@ -1232,29 +1740,16 @@ export default function ShoppingListScreen() {
               />
               <Text style={styles.memberLabel}>Assorted Members (select at least 2)</Text>
               <View style={styles.memberGrid}>
-                {products.map((product) => {
-                  const selected = createAssortedMemberIds.includes(product.id);
-                  return (
-                    <Pressable
-                      key={`create-assorted-member-${product.id}`}
-                      accessibilityLabel={`Toggle Assorted Member ${product.name}`}
-                      accessibilityRole="button"
-                      onPress={() => {
-                        setCreateAssortedMemberIds((current) =>
-                          toggleMember(current, product.id),
-                        );
-                        setErrorMessage(null);
-                      }}
-                      style={({ pressed }) => [
-                        styles.memberChip,
-                        selected && styles.memberChipSelected,
-                        pressed && styles.buttonPressed,
-                      ]}
-                    >
-                      <Text style={styles.memberChipLabel}>{product.name}</Text>
-                    </Pressable>
-                  );
-                })}
+                {products.map((product) => (
+                  <MemberChip
+                    key={`create-assorted-member-${product.id}`}
+                    productId={product.id}
+                    label={product.name}
+                    selected={createAssortedMemberIds.includes(product.id)}
+                    accessibilityLabel={`Toggle Assorted Member ${product.name}`}
+                    onToggle={toggleCreateAssortedMember}
+                  />
+                ))}
               </View>
               <Pressable
                 accessibilityLabel="Submit Create Assorted Shopping List Item"
@@ -1325,36 +1820,20 @@ export default function ShoppingListScreen() {
                 onChangeText={setEditAssortedBundlePrice}
               />
               <Text style={styles.memberLabel}>Edit Assorted Members</Text>
-              <View style={styles.memberGrid}>
-                {products.map((product) => {
-                  const selected = editAssortedMemberIds.includes(product.id);
-                  return (
-                    <Pressable
+              {selectedAssortedItem ? (
+                <View style={styles.memberGrid}>
+                  {products.map((product) => (
+                    <MemberChip
                       key={`edit-assorted-member-${product.id}`}
+                      productId={product.id}
+                      label={product.name}
+                      selected={editAssortedMemberIds.includes(product.id)}
                       accessibilityLabel={`Toggle Edit Assorted Member ${product.name}`}
-                      accessibilityRole="button"
-                      disabled={!selectedAssortedItem}
-                      onPress={() => {
-                        if (!selectedAssortedItem) {
-                          return;
-                        }
-                        setEditAssortedMemberIds((current) =>
-                          toggleMember(current, product.id),
-                        );
-                        setErrorMessage(null);
-                      }}
-                      style={({ pressed }) => [
-                        styles.memberChip,
-                        selected && styles.memberChipSelected,
-                        !selectedAssortedItem && styles.buttonDisabled,
-                        pressed && styles.buttonPressed,
-                      ]}
-                    >
-                      <Text style={styles.memberChipLabel}>{product.name}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                      onToggle={toggleEditAssortedMember}
+                    />
+                  ))}
+                </View>
+              ) : null}
               <Pressable
                 accessibilityLabel="Submit Assorted Shopping List Item Update"
                 accessibilityRole="button"

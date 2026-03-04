@@ -132,6 +132,14 @@ export type RemoveShoppingListItemResult = {
   removedItemId: number;
 };
 
+export type RemoveAssortedShoppingListItemInput = {
+  itemId: number;
+};
+
+export type RemoveAssortedShoppingListItemResult = {
+  removedItemId: number;
+};
+
 const SHOPPING_LIST_INPUT_INVALID_MESSAGE =
   "Quantity must be a positive integer, unit price must be a non-negative integer, and bundle offers must include both fields with bundle quantity >= 2 and bundle price > 0.";
 const SHOPPING_LIST_ARCHIVED_PRODUCT_CONFLICT_MESSAGE =
@@ -1162,6 +1170,76 @@ export async function removeShoppingListItem(
     };
   } catch (error: unknown) {
     console.warn("[shopping-list-service] removeShoppingListItem failed", {
+      reason: getSafeErrorReason(error),
+    });
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_UNAVAILABLE",
+        message: OWNER_SCOPE_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+}
+
+export async function removeAssortedShoppingListItem(
+  input: RemoveAssortedShoppingListItemInput,
+): Promise<OwnerScopeResult<RemoveAssortedShoppingListItemResult>> {
+  const ownerContext = requireActiveOwnerContext();
+  if (!ownerContext.ok) {
+    return ownerContext;
+  }
+
+  await bootstrapDatabase();
+  const db = getDb();
+  const existing = await findAssortedItem(input.itemId);
+
+  if (!existing) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_NOT_FOUND",
+        message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+      },
+    };
+  }
+
+  if (existing.owner_id !== ownerContext.value.id) {
+    return {
+      ok: false,
+      error: {
+        code: "OWNER_SCOPE_MISMATCH",
+        message: OWNER_SCOPE_MISMATCH_MESSAGE,
+      },
+    };
+  }
+
+  try {
+    const deleteResult = await db.runAsync(
+      `DELETE FROM ${SHOPPING_LIST_ASSORTED_ITEM_TABLE}
+       WHERE id = ? AND owner_id = ?;`,
+      input.itemId,
+      ownerContext.value.id,
+    );
+
+    if (deleteResult.changes < 1) {
+      return {
+        ok: false,
+        error: {
+          code: "OWNER_SCOPE_NOT_FOUND",
+          message: OWNER_SCOPE_NOT_FOUND_MESSAGE,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      value: {
+        removedItemId: input.itemId,
+      },
+    };
+  } catch (error: unknown) {
+    console.warn("[shopping-list-service] removeAssortedShoppingListItem failed", {
       reason: getSafeErrorReason(error),
     });
     return {

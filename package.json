@@ -12,7 +12,8 @@
     "test:gate": "tsc -p tsconfig.test.json && node .tmp-tests/tests/entry-gating.spec.js",
     "test:gate:integration": "jest --config ./jest.config.cjs --runInBand --watchman=false",
     "test:gate:all": "npm run test:gate && npm run test:gate:integration",
-    "benchmark:cold-start:android": "node ./scripts/benchmark-cold-start-android.mjs"
+    "benchmark:cold-start:android": "node ./scripts/benchmark-cold-start-android.mjs",
+    "perf:shopping-list:summary": "node ./scripts/summarize-shopping-list-perf-log.mjs"
   },
   "dependencies": {
     "@react-navigation/bottom-tabs": "^7.7.3",

@@ -23,9 +23,7 @@ CREATE TABLE IF NOT EXISTS ${ADMIN_TABLE} (
 export const CREATE_APP_SECRET_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS ${APP_SECRET_TABLE} (
   key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-  updated_at_ms INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  value TEXT NOT NULL
 );
 `;
 
@@ -133,12 +131,12 @@ CREATE TABLE IF NOT EXISTS ${SHOPPING_LIST_ITEM_TABLE} (
   unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
   bundle_qty INTEGER CHECK (bundle_qty IS NULL OR (typeof(bundle_qty) = 'integer' AND bundle_qty >= 2)),
   bundle_price_cents INTEGER CHECK (bundle_price_cents IS NULL OR (typeof(bundle_price_cents) = 'integer' AND bundle_price_cents > 0)),
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
   CHECK (
     (bundle_qty IS NULL AND bundle_price_cents IS NULL) OR
     (bundle_qty IS NOT NULL AND bundle_price_cents IS NOT NULL)
   ),
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES ${STORE_OWNER_TABLE}(id) ON DELETE CASCADE,
   FOREIGN KEY (owner_id, product_id) REFERENCES ${PRODUCT_TABLE}(owner_id, id) ON DELETE RESTRICT
 );
@@ -163,12 +161,12 @@ CREATE TABLE IF NOT EXISTS ${SHOPPING_LIST_ASSORTED_ITEM_TABLE} (
   unit_price_cents INTEGER NOT NULL CHECK (typeof(unit_price_cents) = 'integer' AND unit_price_cents >= 0),
   bundle_qty INTEGER CHECK (bundle_qty IS NULL OR (typeof(bundle_qty) = 'integer' AND bundle_qty >= 2)),
   bundle_price_cents INTEGER CHECK (bundle_price_cents IS NULL OR (typeof(bundle_price_cents) = 'integer' AND bundle_price_cents > 0)),
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
   CHECK (
     (bundle_qty IS NULL AND bundle_price_cents IS NULL) OR
     (bundle_qty IS NOT NULL AND bundle_price_cents IS NOT NULL)
   ),
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES ${STORE_OWNER_TABLE}(id) ON DELETE CASCADE
 );
 `;

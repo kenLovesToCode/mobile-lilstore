@@ -6,6 +6,7 @@ import {
   setActiveOwner,
   setAdminSession,
 } from "@/domain/services/admin-session";
+import { createLargeOwnerShoppingFixture } from "./fixtures/admin-shopping-list-large-owner.fixture";
 
 const mockListProducts = jest.fn();
 const mockListShoppingListItems = jest.fn();
@@ -15,6 +16,7 @@ const mockUpdateShoppingListItem = jest.fn();
 const mockCreateAssortedShoppingListItem = jest.fn();
 const mockUpdateAssortedShoppingListItem = jest.fn();
 const mockRemoveShoppingListItem = jest.fn();
+const mockRemoveAssortedShoppingListItem = jest.fn();
 const originalConsoleError = console.error;
 
 jest.mock("@/domain/services/owner-data-service", () => ({
@@ -29,6 +31,8 @@ jest.mock("@/domain/services/owner-data-service", () => ({
   updateAssortedShoppingListItem: (...args: unknown[]) =>
     mockUpdateAssortedShoppingListItem(...args),
   removeShoppingListItem: (...args: unknown[]) => mockRemoveShoppingListItem(...args),
+  removeAssortedShoppingListItem: (...args: unknown[]) =>
+    mockRemoveAssortedShoppingListItem(...args),
 }));
 
 const ROUTES = {
@@ -489,6 +493,31 @@ describe("shopping-list admin route integration", () => {
         },
       });
     });
+    mockRemoveAssortedShoppingListItem.mockImplementation(
+      ({ itemId }: { itemId: number }) => {
+        const activeOwner = require("@/domain/services/admin-session").getActiveOwner();
+        if (!activeOwner) {
+          return Promise.resolve({
+            ok: false,
+            error: {
+              code: "OWNER_SCOPE_REQUIRES_ACTIVE_OWNER",
+              message: "Select an active owner before managing owner-scoped data.",
+            },
+          });
+        }
+
+        const ownerId = activeOwner.id;
+        ownerAssortedShoppingList[ownerId] = (
+          ownerAssortedShoppingList[ownerId] ?? []
+        ).filter((item) => item.id !== itemId);
+        return Promise.resolve({
+          ok: true,
+          value: {
+            removedItemId: itemId,
+          },
+        });
+      },
+    );
   });
 
   it("creates shopping-list items with optional bundle fields", async () => {
@@ -723,7 +752,7 @@ describe("shopping-list admin route integration", () => {
 
     expect(mockRemoveShoppingListItem).not.toHaveBeenCalled();
     expect(
-      screen.getAllByText("Press Remove Shopping List Item again to confirm.").length,
+      screen.getAllByText("Press Remove Selected Shopping List Item again to confirm.").length,
     ).toBe(1);
 
     fireEvent.press(screen.getByLabelText("Remove Selected Shopping List Item"));
@@ -736,6 +765,50 @@ describe("shopping-list admin route integration", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("Qty 2 · ₱1.00")).toBeFalsy();
+    });
+  });
+
+  it("removes selected assorted shopping-list items after explicit confirmation", async () => {
+    ownerAssortedShoppingList[101] = [
+      {
+        id: 77,
+        ownerId: 101,
+        name: "Assorted",
+        quantity: 8,
+        unitPriceCents: 250,
+        bundleQty: null,
+        bundlePriceCents: null,
+        memberProductIds: [1],
+        memberCount: 1,
+        createdAtMs: 1,
+        updatedAtMs: 1,
+      },
+    ];
+
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Assorted · 1 members")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Edit Assorted Shopping List Item #77"));
+    fireEvent.press(screen.getByLabelText("Remove Selected Shopping List Item"));
+
+    expect(mockRemoveAssortedShoppingListItem).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText("Press Remove Selected Shopping List Item again to confirm.").length,
+    ).toBe(1);
+
+    fireEvent.press(screen.getByLabelText("Remove Selected Shopping List Item"));
+
+    await waitFor(() => {
+      expect(mockRemoveAssortedShoppingListItem).toHaveBeenCalledWith({
+        itemId: 77,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Assorted · 1 members")).toBeFalsy();
     });
   });
 
@@ -915,6 +988,130 @@ describe("shopping-list admin route integration", () => {
     const listShoppingListCallCount = mockListShoppingListItems.mock.calls.length;
 
     fireEvent.press(screen.getByLabelText("Select Product Milk"));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockListProducts).toHaveBeenCalledTimes(listProductsCallCount);
+    expect(mockListShoppingListItems).toHaveBeenCalledTimes(
+      listShoppingListCallCount,
+    );
+  });
+
+  it("supports large owner-scoped product and shopping-list filtering without extra fetches", async () => {
+    const largeFixture = createLargeOwnerShoppingFixture(101);
+    ownerProducts[101] = largeFixture.products;
+    ownerShoppingList[101] = largeFixture.shoppingItems;
+    ownerAssortedShoppingList[101] = largeFixture.assortedItems;
+
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+      expect(screen.getByLabelText("Search Active Products")).toBeTruthy();
+      expect(screen.getByLabelText("Search Published Shopping List")).toBeTruthy();
+    });
+
+    const listProductsCallCount = mockListProducts.mock.calls.length;
+    const listShoppingListCallCount = mockListShoppingListItems.mock.calls.length;
+    const sectionList = screen.getByTestId("shopping-list-sections");
+
+    fireEvent.scroll(sectionList, {
+      nativeEvent: {
+        contentOffset: { y: 1400, x: 0 },
+        contentSize: { width: 380, height: 8000 },
+        layoutMeasurement: { width: 380, height: 760 },
+      },
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Search Active Products"), "dragon-203");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select Product Dragon Fruit Reserve")).toBeTruthy();
+      expect(screen.queryByLabelText("Select Product Fixture Product 001")).toBeFalsy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Select Product Dragon Fruit Reserve"));
+    fireEvent.changeText(screen.getByLabelText("Search Published Shopping List"), "dragon");
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(
+          `Edit Shopping List Item #${largeFixture.highlightedShoppingItemId}`,
+        ),
+      ).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByLabelText("Search Published Shopping List"), "citrus");
+
+    await waitFor(() => {
+      expect(screen.getByText("Assorted Citrus Mix · 3 members")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText("Search Published Shopping List Clear"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(
+          `Edit Shopping List Item #${largeFixture.highlightedShoppingItemId}`,
+        ),
+      ).toBeTruthy();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockListProducts).toHaveBeenCalledTimes(listProductsCallCount);
+    expect(mockListShoppingListItems).toHaveBeenCalledTimes(
+      listShoppingListCallCount,
+    );
+  });
+
+  it("does not refetch when repeatedly selecting filtered published shopping rows", async () => {
+    const largeFixture = createLargeOwnerShoppingFixture(101);
+    ownerProducts[101] = largeFixture.products;
+    ownerShoppingList[101] = largeFixture.shoppingItems;
+    ownerAssortedShoppingList[101] = largeFixture.assortedItems;
+
+    await renderShoppingListRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Active owner: Owner A")).toBeTruthy();
+      expect(screen.getByLabelText("Search Published Shopping List")).toBeTruthy();
+    });
+
+    const listProductsCallCount = mockListProducts.mock.calls.length;
+    const listShoppingListCallCount = mockListShoppingListItems.mock.calls.length;
+
+    fireEvent.changeText(screen.getByLabelText("Search Active Products"), "dragon-203");
+    fireEvent.changeText(screen.getByLabelText("Search Published Shopping List"), "dragon");
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(
+          `Edit Shopping List Item #${largeFixture.highlightedShoppingItemId}`,
+        ),
+      ).toBeTruthy();
+    });
+
+    const highlightedRow = screen.getByLabelText(
+      `Edit Shopping List Item #${largeFixture.highlightedShoppingItemId}`,
+    );
+    fireEvent.press(highlightedRow);
+    fireEvent.press(highlightedRow);
+    fireEvent.press(highlightedRow);
+
+    fireEvent.changeText(screen.getByLabelText("Search Published Shopping List"), "citrus");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Edit Assorted Shopping List Item #9001")).toBeTruthy();
+    });
+
+    const assortedRow = screen.getByLabelText("Edit Assorted Shopping List Item #9001");
+    fireEvent.press(assortedRow);
+    fireEvent.press(assortedRow);
 
     await act(async () => {
       await Promise.resolve();

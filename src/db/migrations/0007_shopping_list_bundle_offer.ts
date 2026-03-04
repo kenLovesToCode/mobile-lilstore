@@ -107,13 +107,19 @@ export async function ensureShoppingListBundleColumns(db: MigrationDb) {
   // Run repair once per DB, and re-run if columns are newly introduced on a later upgrade.
   if (addedColumn || !hasRepairMarker) {
     await db.execAsync(REPAIR_LEGACY_BUNDLE_INTEGRITY_SQL);
-    const nowMs = Date.now();
     await db.execAsync(
-      `INSERT INTO ${APP_SECRET_TABLE}(key, value, created_at_ms, updated_at_ms)
-       VALUES ('${BUNDLE_REPAIR_MIGRATION_KEY}', 'done', ${nowMs}, ${nowMs})
-       ON CONFLICT(key) DO UPDATE
-       SET value = 'done',
-           updated_at_ms = ${nowMs};`,
+      `UPDATE ${APP_SECRET_TABLE}
+       SET value = 'done'
+       WHERE key = '${BUNDLE_REPAIR_MIGRATION_KEY}';`,
+    );
+    await db.execAsync(
+      `INSERT INTO ${APP_SECRET_TABLE}(key, value)
+       SELECT '${BUNDLE_REPAIR_MIGRATION_KEY}', 'done'
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM ${APP_SECRET_TABLE}
+         WHERE key = '${BUNDLE_REPAIR_MIGRATION_KEY}'
+       );`,
     );
   }
 }

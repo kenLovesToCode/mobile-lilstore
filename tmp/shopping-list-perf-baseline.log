@@ -1,0 +1,18 @@
+Starting project at /Users/kenlovestocode/Desktop/Me/ai/LilStore
+Using src/app as the root directory for Expo Router.
+React Compiler enabled
+Starting Metro Bundler
+
+Recrawled this watch 3 times, most recently because:
+MustScanSubDirs UserDroppedTo resolve, please review the information on
+https://facebook.github.io/watchman/docs/troubleshooting.html#recrawl
+To clear this warning, run:
+`watchman watch-del '/Users/kenlovestocode/Desktop/Me/ai/LilStore' ; watchman watch-project '/Users/kenlovestocode/Desktop/Me/ai/LilStore'`
+
+The following packages should be updated for best compatibility with the installed expo version:
+  expo-crypto@15.0.8 - expected version: ~55.0.8
+Your project may not work correctly until you install the expected versions of the packages.
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+iOS node_modules/expo-router/entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+iOS Bundled 3380ms node_modules/expo-router/entry.js (1086 modules)

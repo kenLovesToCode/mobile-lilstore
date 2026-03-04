@@ -62,7 +62,7 @@ development_status:
   4-1-create-shopping-list-items-unit-price-available-qty: done
   4-2-configure-optional-bundle-offers: done
   4-3-create-and-manage-assorted-shopping-list-groups: done
-  4-4-admin-shopping-list-management-remains-responsive-at-scale: backlog
+  4-4-admin-shopping-list-management-remains-responsive-at-scale: done
   epic-4-retrospective: optional
   epic-5: backlog
   5-1-pin-entry-unlocks-shopper-session: backlog

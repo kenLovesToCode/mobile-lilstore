@@ -106,12 +106,18 @@ export async function ensureShoppingListAssortedTables(db: MigrationDb) {
   await db.execAsync(REPAIR_ORPHANED_MEMBERS_SQL);
   await db.execAsync(REPAIR_INVALID_GROUP_SIZE_SQL);
 
-  const nowMs = Date.now();
   await db.execAsync(
-    `INSERT INTO ${APP_SECRET_TABLE}(key, value, created_at_ms, updated_at_ms)
-     VALUES ('${ASSORTED_REPAIR_MIGRATION_KEY}', 'done', ${nowMs}, ${nowMs})
-     ON CONFLICT(key) DO UPDATE
-     SET value = 'done',
-         updated_at_ms = ${nowMs};`,
+    `UPDATE ${APP_SECRET_TABLE}
+     SET value = 'done'
+     WHERE key = '${ASSORTED_REPAIR_MIGRATION_KEY}';`,
+  );
+  await db.execAsync(
+    `INSERT INTO ${APP_SECRET_TABLE}(key, value)
+     SELECT '${ASSORTED_REPAIR_MIGRATION_KEY}', 'done'
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM ${APP_SECRET_TABLE}
+       WHERE key = '${ASSORTED_REPAIR_MIGRATION_KEY}'
+     );`,
   );
 }
