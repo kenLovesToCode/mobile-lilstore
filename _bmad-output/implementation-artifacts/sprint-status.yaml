@@ -83,3 +83,17 @@ development_status:
   7-3-admin-dashboard-alerts-low-stock-backup-freshness: backlog
   7-4-dashboard-accessible-and-useful-in-offline-mode: backlog
   epic-7-retrospective: optional
+<<<<<<< Updated upstream
+=======
+  epic-8: in-progress
+  8-1-shopper-pin-and-shopper-management-stability-fixes: done
+  epic-8-retrospective: optional
+  epic-9: in-progress
+  9-1-tamagui-foundation-and-admin-theme-shell: done
+  9-2-admin-bottom-navigation-and-route-restructure: done
+  9-3-dashboard-redesign-with-illustration-and-motion: done
+  9-4-products-and-shopping-flows-redesign: done
+  9-5-remaining-admin-modules-visual-alignment: done
+  9-6-admin-ui-motion-accessibility-and-qa-pass: done
+  epic-9-retrospective: optional
+>>>>>>> Stashed changes
