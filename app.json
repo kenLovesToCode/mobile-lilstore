@@ -34,7 +34,14 @@
             "imageWidth": 76
           }
         }
+<<<<<<< Updated upstream
       ]
+=======
+      ],
+      "expo-sqlite",
+      "expo-sharing",
+      "expo-image"
+>>>>>>> Stashed changes
     ],
     "experiments": {
       "typedRoutes": true,

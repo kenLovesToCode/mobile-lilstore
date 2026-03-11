@@ -30,11 +30,23 @@ export function resolveMotionPressableTransform(
   return [{ scale: adminDesignTokens.motion.pressScale }];
 }
 
+function resolveMotionPressableStyle(
+  interactionStyle: ViewStyle,
+  style?: StyleProp<ViewStyle>,
+) {
+  const flattenedStyle = StyleSheet.flatten(style);
+
+  return flattenedStyle == null
+    ? [styles.base, interactionStyle]
+    : [styles.base, interactionStyle, flattenedStyle];
+}
+
 export function MotionPressable({
   children,
   tone = "secondary",
   style,
   disabled,
+  accessibilityState,
   ...props
 }: MotionPressableProps) {
   const [reduceMotion, setReduceMotion] = useState(true);
@@ -103,7 +115,7 @@ export function MotionPressable({
       accessibilityRole="button"
       accessibilityState={{
         disabled: Boolean(disabled),
-        ...props.accessibilityState,
+        ...(accessibilityState ?? undefined),
       }}
       disabled={disabled}
       style={({ pressed }) => {
@@ -125,9 +137,13 @@ export function MotionPressable({
           interactionStyle.elevation = adminElevation.raised.elevation;
         }
 
-        interactionStyle.transform = resolveMotionPressableTransform(pressed, reduceMotion);
+        const transform = resolveMotionPressableTransform(pressed, reduceMotion);
 
-        return style ? [styles.base, interactionStyle, style] : [styles.base, interactionStyle];
+        if (transform) {
+          interactionStyle.transform = transform;
+        }
+
+        return resolveMotionPressableStyle(interactionStyle, style);
       }}
       {...props}
     >
